@@ -6627,6 +6627,13 @@ static bool ggml_vk_should_use_mmvq(const vk_device& device, uint32_t m, uint32_
             return true;
         }
 
+        // Volta on NVK (GV100/GV11B): MMVQ beats the dequantizing path for
+        // every type it handles, including Q8_0 and k = 2048.
+        if (device->driver_id == vk::DriverId::eMesaNvk &&
+            strstr(device->properties.deviceName, " GV1") != nullptr) {
+            return true;
+        }
+
         if (k <= 4096) {
             return false;
         }
