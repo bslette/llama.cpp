@@ -9637,7 +9637,10 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
 
     // whole 128x128 tiles (the Vulkan Volta f16 GEMM path on NVK)
-    for (ggml_type t : {GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K, GGML_TYPE_Q6_K, GGML_TYPE_IQ4_NL}) {
+    for (ggml_type t : {GGML_TYPE_Q4_0, GGML_TYPE_Q4_1, GGML_TYPE_Q5_0, GGML_TYPE_Q5_1, GGML_TYPE_Q8_0,
+                        GGML_TYPE_MXFP4, GGML_TYPE_Q2_K, GGML_TYPE_Q3_K, GGML_TYPE_Q4_K, GGML_TYPE_Q5_K,
+                        GGML_TYPE_Q6_K, GGML_TYPE_IQ1_S, GGML_TYPE_IQ1_M, GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ2_XS,
+                        GGML_TYPE_IQ2_S, GGML_TYPE_IQ3_XXS, GGML_TYPE_IQ3_S, GGML_TYPE_IQ4_NL, GGML_TYPE_IQ4_XS}) {
         test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 256, 128, 256, {1, 1}, {1, 1}));
         test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 512, 256, 1024, {1, 1}, {1, 1}));
         test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 128, 384, 2048, {1, 1}, {1, 1}));

@@ -5,36 +5,39 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer A {block_iq3_s data_a[];};
-layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+layout (binding = 1) writeonly buffer D {uvec4 data_b4[];};   // 8 f16 per element
+
+// Coalesced: each invocation produces one 8-value group of a 32-value sub-block and writes it
+// as one 16-byte store, so a subgroup writes 512 contiguous bytes per store.  The dispatch is
+// unchanged: a workgroup covers 32 super-blocks (8192 values), 4 groups per invocation.
+vec4 sgn4(uint s) {
+    return vec4((s & 1u) != 0 ? -1.0 : 1.0, (s & 2u) != 0 ? -1.0 : 1.0,
+                (s & 4u) != 0 ? -1.0 : 1.0, (s & 8u) != 0 ? -1.0 : 1.0);
+}
 
 void main() {
-    // Each thread handles 1 scale nibble.
-    // Each block contains 4 scale bytes (8 scales) for 256 output values.
-    const uint ib = gl_WorkGroupID.x * 32 + gl_LocalInvocationID.x / 8;
-
     init_iq_shmem(gl_WorkGroupSize);
 
-    if (ib >= p.nel / 256) {
-        return;
-    }
-
-    const uint is = gl_LocalInvocationID.x % 8;
-    const uint b_idx = 256 * ib + 32 * is;
-
-    const float d = float(data_a[ib].d);
-    const float db = d * (1 + 2 * ((data_a[ib].scales[is / 2] >> (4 * (is % 2))) & 0xf));
-
-    // We must produce 32 values using 4 sign bytes, 1 qh byte, 8 qs bytes.
-    uint qh = data_a[ib].qh[is];
-    [[unroll]] for (uint l = 0; l < 8; ++l) {
-        const uint iqs = 8 * is + l;
-        const uint qs = data_a[ib].qs[iqs];
-        const uint gidx = qs | ((qh << (8 - l)) & 256);
-        const uint8_t signs = data_a[ib].signs[iqs / 2] >> (4 * (l & 1));
-        const u8vec4 grid = unpack8(iq3s_grid[gidx]);
-        data_b[b_idx + 4 * l + 0] = D_TYPE(db * grid.x * ((signs & 1) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 4 * l + 1] = D_TYPE(db * grid.y * ((signs & 2) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 4 * l + 2] = D_TYPE(db * grid.z * ((signs & 4) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 4 * l + 3] = D_TYPE(db * grid.w * ((signs & 8) != 0 ? -1.0 : 1.0));
+    [[unroll]] for (uint h = 0; h < 4; h++) {
+        const uint c = gl_WorkGroupID.x * 1024 + h * 256 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
+            return;
+        }
+        const uint ib = c / 32;
+        const uint is = (c % 32) / 4;   // 32-value sub-block
+        const uint l = c % 4;           // 8-value group in it
+        vec4 v0, v1;
+        const float d = float(data_a[ib].d);
+        const float db = d * (1 + 2 * ((data_a[ib].scales[is / 2] >> (4 * (is % 2))) & 0xf));
+        const uint qh = data_a[ib].qh[is];
+        const uint signs = data_a[ib].signs[4 * is + l];   // low nibble: group 2l, high: 2l + 1
+        [[unroll]] for (uint k = 0; k < 2; k++) {
+            const uint L = 2 * l + k;
+            const uint qs = data_a[ib].qs[8 * is + L];
+            const uint gidx = qs | ((qh << (8 - L)) & 256);
+            const vec4 v = vec4(unpack8(iq3s_grid[gidx])) * db * sgn4(signs >> (4 * k));
+            if (k == 0) { v0 = v; } else { v1 = v; }
+        }
+        data_b4[c] = uvec4(packHalf2x16(v0.xy), packHalf2x16(v0.zw), packHalf2x16(v1.xy), packHalf2x16(v1.zw));
     }
 }

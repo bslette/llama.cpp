@@ -5,39 +5,37 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer A {block_iq2_xs data_a[];};
-layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+layout (binding = 1) writeonly buffer D {uvec4 data_b4[];};   // 8 f16 per element
+
+// Coalesced: each invocation produces one 8-value group of a 32-value sub-block and writes it
+// as one 16-byte store, so a subgroup writes 512 contiguous bytes per store.  The dispatch is
+// unchanged: a workgroup covers 32 super-blocks (8192 values), 4 groups per invocation.
+vec4 sgn4(uint s) {
+    return vec4((s & 1u) != 0 ? -1.0 : 1.0, (s & 2u) != 0 ? -1.0 : 1.0,
+                (s & 4u) != 0 ? -1.0 : 1.0, (s & 8u) != 0 ? -1.0 : 1.0);
+}
 
 void main() {
-    // Each thread handles 1 subblock (32 values with 2 scales)
-    const uint ib = gl_WorkGroupID.x * 32 + gl_LocalInvocationID.x / 8;
-
     init_iq_shmem(gl_WorkGroupSize);
 
-    if (ib >= p.nel / 256) {
-        return;
-    }
-
-    const uint ib32 = gl_LocalInvocationID.x % 8;
-    const uint b_idx = 256 * ib + 32 * ib32;
-
-    const float d = float(data_a[ib].d);
-    const vec2 scale = vec2(data_a[ib].scales[ib32] & 0xf, data_a[ib].scales[ib32] >> 4);
-    const vec2 db = d * (0.5 + scale) * 0.25;
-
-    [[unroll]] for (uint l = 0; l < 4; ++l) {
-        uint16_t qs = data_a[ib].qs[4 * ib32 + l];
+    [[unroll]] for (uint h = 0; h < 4; h++) {
+        const uint c = gl_WorkGroupID.x * 1024 + h * 256 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
+            return;
+        }
+        const uint ib = c / 32;
+        const uint is = (c % 32) / 4;   // 32-value sub-block
+        const uint l = c % 4;           // 8-value group in it
+        vec4 v0, v1;
+        const float d = float(data_a[ib].d);
+        const float scale = float((data_a[ib].scales[is] >> (4 * (l / 2))) & 0xf);
+        const float db = d * (0.5 + scale) * 0.25;
+        const uint qs = uint(data_a[ib].qs[4 * is + l]);
         const uint sign7 = qs >> 9;
         const uint sign8 = sign7 | (bitCount(sign7) << 7); // parity bit
         const uvec2 grid = iq2xs_grid[qs & 511];
-        const u8vec4 grid0 = unpack8(grid.x);
-        const u8vec4 grid1 = unpack8(grid.y);
-        data_b[b_idx + 8 * l + 0] = D_TYPE(db[l/2] * grid0.x * ((sign8 & 1) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 1] = D_TYPE(db[l/2] * grid0.y * ((sign8 & 2) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 2] = D_TYPE(db[l/2] * grid0.z * ((sign8 & 4) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 3] = D_TYPE(db[l/2] * grid0.w * ((sign8 & 8) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 4] = D_TYPE(db[l/2] * grid1.x * ((sign8 & 16) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 5] = D_TYPE(db[l/2] * grid1.y * ((sign8 & 32) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 6] = D_TYPE(db[l/2] * grid1.z * ((sign8 & 64) != 0 ? -1.0 : 1.0));
-        data_b[b_idx + 8 * l + 7] = D_TYPE(db[l/2] * grid1.w * ((sign8 & 128) != 0 ? -1.0 : 1.0));
+        v0 = vec4(unpack8(grid.x)) * db * sgn4(sign8);
+        v1 = vec4(unpack8(grid.y)) * db * sgn4(sign8 >> 4);
+        data_b4[c] = uvec4(packHalf2x16(v0.xy), packHalf2x16(v0.zw), packHalf2x16(v1.xy), packHalf2x16(v1.zw));
     }
 }

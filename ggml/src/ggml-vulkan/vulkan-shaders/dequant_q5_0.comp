@@ -4,31 +4,38 @@
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-layout (binding = 0) readonly buffer A {block_q5_0 data_a[];};
-layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+layout (binding = 0) readonly buffer A {A_TYPE_PACKED16 data_a[];};
+layout (binding = 1) writeonly buffer D {uvec4 data_b4[];};   // 8 f16 per element
+
+// Each invocation writes two chunks of 8 consecutive f16 as one 16-byte store each, so a
+// subgroup writes 512 contiguous bytes per store.  A 32-value block is 4 chunks: low nibbles
+// of qs[0..7], low of qs[8..15], high of qs[0..7], high of qs[8..15] (values 0-7, 8-15,
+// 16-23, 24-31).  The dispatch is unchanged: a workgroup covers 4096 values.
+
+// bit i of b (i < 4) -> bit 4 of byte i
+uint spread4(uint b) {
+    return ((b & 1u) | ((b & 2u) << 7) | ((b & 4u) << 14) | ((b & 8u) << 21)) << 4;
+}
 
 void main() {
-    const uint i = gl_WorkGroupID.x * 4 + gl_LocalInvocationID.x / 64;
-
-    const uint tid = gl_LocalInvocationID.x % 64;
-    const uint il  = tid/32;
-    const uint ir  = tid%32;
-    const uint ib = 32*i + ir;
-    if (ib >= p.nel / 32) {
-        return;
-    }
-
-    const uint b_idx = 1024*i + 32*ir + 8*il;
-
-    const float d = float(data_a[ib].d);
-    const uint qh = uint(data_a[ib].qh[1]) << 16 | data_a[ib].qh[0];
-
-    const uint q_idx = 8*il;
-
-    [[unroll]] for (uint l = 0; l < 8; ++l) {
-        const uint iqs = q_idx + l;
-        const uint vui = uint(data_a[ib].qs[iqs]);
-        data_b[b_idx + l +  0] = D_TYPE(d * (((vui & 0xF) | (((qh >> iqs) << 4) & 0x10)) - 16.0f));
-        data_b[b_idx + l + 16] = D_TYPE(d * (((vui >>  4) | ((qh >> (iqs + 12)) & 0x10)) - 16.0f));
+    [[unroll]] for (uint h = 0; h < 2; h++) {
+        const uint c = gl_WorkGroupID.x * 512 + h * 256 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
+            return;
+        }
+        const uint ib = c / 4;
+        const uint t  = c % 4;
+        const uint q0 = uint(data_a[ib].qs[(t & 1) * 4 + 0]) | (uint(data_a[ib].qs[(t & 1) * 4 + 1]) << 16);
+        const uint q1 = uint(data_a[ib].qs[(t & 1) * 4 + 2]) | (uint(data_a[ib].qs[(t & 1) * 4 + 3]) << 16);
+        const uint sh = (t >> 1) * 4;
+        uint n0 = (q0 >> sh) & 0x0F0F0F0F;
+        uint n1 = (q1 >> sh) & 0x0F0F0F0F;
+        const float d = float(data_a[ib].d);
+        const uint qh = (uint(data_a[ib].qh[0]) | (uint(data_a[ib].qh[1]) << 16)) >> (t * 8);
+        n0 |= spread4(qh & 0xF);
+        n1 |= spread4((qh >> 4) & 0xF);
+        const vec4 v0 = (vec4(unpack8(n0)) - 16.0f) * d;
+        const vec4 v1 = (vec4(unpack8(n1)) - 16.0f) * d;
+        data_b4[c] = uvec4(packHalf2x16(v0.xy), packHalf2x16(v0.zw), packHalf2x16(v1.xy), packHalf2x16(v1.zw));
     }
 }

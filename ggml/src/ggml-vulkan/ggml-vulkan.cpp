@@ -6393,11 +6393,19 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     const bool prefer_f16_b = is_coopmat && ggml_is_quantized(src0->type) && src1->type == GGML_TYPE_F32;
 
     // Volta on NVK: dequantize src0 to f16 and use the Volta GEMM for whole 128x128 tiles, like
-    // CUDA does on Volta.  Only for types whose f16 dequantization is fast.
-    const bool volta_type = src0->type == GGML_TYPE_Q4_0 || src0->type == GGML_TYPE_Q8_0 ||
-                            src0->type == GGML_TYPE_Q2_K || src0->type == GGML_TYPE_Q3_K ||
-                            src0->type == GGML_TYPE_Q4_K || src0->type == GGML_TYPE_Q5_K ||
-                            src0->type == GGML_TYPE_Q6_K || src0->type == GGML_TYPE_IQ3_S;
+    // CUDA does on Volta.  The dequantization shaders write coalesced 16-byte chunks.
+    bool volta_type = false;
+    switch (src0->type) {
+        case GGML_TYPE_Q4_0: case GGML_TYPE_Q4_1: case GGML_TYPE_Q5_0: case GGML_TYPE_Q5_1: case GGML_TYPE_Q8_0:
+        case GGML_TYPE_MXFP4:
+        case GGML_TYPE_Q2_K: case GGML_TYPE_Q3_K: case GGML_TYPE_Q4_K: case GGML_TYPE_Q5_K: case GGML_TYPE_Q6_K:
+        case GGML_TYPE_IQ1_S: case GGML_TYPE_IQ1_M: case GGML_TYPE_IQ2_XXS: case GGML_TYPE_IQ2_XS: case GGML_TYPE_IQ2_S:
+        case GGML_TYPE_IQ3_XXS: case GGML_TYPE_IQ3_S: case GGML_TYPE_IQ4_NL: case GGML_TYPE_IQ4_XS:
+            volta_type = true;
+            break;
+        default:
+            break;
+    }
     const bool volta_gemm = ctx->device->pipeline_matmul_volta_f16 != nullptr && volta_type &&
                             src1->type == GGML_TYPE_F32 &&
                             ggml_vk_dim01_contiguous(src0) && ggml_vk_dim01_contiguous(src1) &&
