@@ -5,8 +5,34 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer A {block_q8_0 data_a[];};
+#ifdef DEQUANT_TRANSPOSE
 layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+#else
+layout (binding = 0) readonly buffer A16 {block_q8_0_packed16 data_a16[];};
+layout (binding = 1) writeonly buffer D4 {uvec4 data_b4[];};   // 8 f16 per element
+#endif
 
+#ifndef DEQUANT_TRANSPOSE
+// Each invocation writes two chunks of 8 consecutive f16 as one 16-byte store each, so a
+// subgroup writes 512 contiguous bytes per store.  A q8_0 block (32 values) is 4 chunks.
+// The dispatch is unchanged: a workgroup covers 4096 values.
+void main() {
+    [[unroll]] for (uint h = 0; h < 2; h++) {
+        const uint c = gl_WorkGroupID.x * 512 + h * 256 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
+            return;
+        }
+        const uint ib = c / 4;
+        const uint q  = (c % 4) * 4;
+        const float d = float(data_a16[ib].d);
+        const int q0 = int(uint16_t(data_a16[ib].qs[q + 0])) | (int(uint16_t(data_a16[ib].qs[q + 1])) << 16);
+        const int q1 = int(uint16_t(data_a16[ib].qs[q + 2])) | (int(uint16_t(data_a16[ib].qs[q + 3])) << 16);
+        const vec4 v0 = vec4(unpack8(q0)) * d;
+        const vec4 v1 = vec4(unpack8(q1)) * d;
+        data_b4[c] = uvec4(packHalf2x16(v0.xy), packHalf2x16(v0.zw), packHalf2x16(v1.xy), packHalf2x16(v1.zw));
+    }
+}
+#else
 void main() {
     const uint i = gl_WorkGroupID.x * 4 + gl_LocalInvocationID.x / 64;
 
@@ -40,3 +66,4 @@ void main() {
         data_b[b_idx + l + 1] = D_TYPE(d * data_a[ib].qs[q_idx + l + 1]);
     }
 }
+#endif

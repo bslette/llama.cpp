@@ -3180,6 +3180,16 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
     ggml_vk_create_pipeline(device, device->pipeline_flash_attn_split_k_reduce, "fa_split_k_reduce", fa_split_k_reduce_len, fa_split_k_reduce_data, "main", 3, sizeof(vk_op_flash_attn_split_k_reduce_push_constants), {1, device->subgroup_size, 1}, {device->subgroup_size}, 1, true);
 
 #if defined(VK_KHR_cooperative_matrix) && defined(GGML_VULKAN_COOPMAT_GLSLC_SUPPORT)
+    // Volta on NVK has HMMA with f16 accumulators but no int8 path fast enough for prompts:
+    // dequantize to f16 and use a GEMM shaped for it, like CUDA does on Volta.
+    if (device->coopmat_support && device->coopmat_acc_f16_support && device->subgroup_size == 32 &&
+        device->driver_id == vk::DriverId::eMesaNvk && strstr(device->properties.deviceName, " GV1") != nullptr &&
+        !getenv("GGML_VK_DISABLE_VOLTA_GEMM")) {
+        ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_f16, "matmul_f16_volta", matmul_f16_volta_cm1_len, matmul_f16_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
+    }
+#endif
+
+#if defined(VK_KHR_cooperative_matrix) && defined(GGML_VULKAN_COOPMAT_GLSLC_SUPPORT)
     if (device->vendor_id == VK_VENDOR_ID_INTEL && (device->architecture == INTEL_XE2 || (device->architecture == INTEL_XE1 && device->coopmat_support && device->uma))) {
         auto upper_power_of_2 = [&](uint32_t in) {
             GGML_ASSERT(in != 0);
@@ -6382,7 +6392,21 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     // coopmat shaders are fast enough that memory bandwidth reduction from f16 activations helps
     const bool prefer_f16_b = is_coopmat && ggml_is_quantized(src0->type) && src1->type == GGML_TYPE_F32;
 
-    const ggml_type y_kernel_type = ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
+    // Volta on NVK: dequantize src0 to f16 and use the Volta GEMM for whole 128x128 tiles, like
+    // CUDA does on Volta.  Only for types whose f16 dequantization is fast.
+    const bool volta_type = src0->type == GGML_TYPE_Q4_0 || src0->type == GGML_TYPE_Q8_0 ||
+                            src0->type == GGML_TYPE_Q2_K || src0->type == GGML_TYPE_Q3_K ||
+                            src0->type == GGML_TYPE_Q4_K || src0->type == GGML_TYPE_Q5_K ||
+                            src0->type == GGML_TYPE_Q6_K || src0->type == GGML_TYPE_IQ3_S;
+    const bool volta_gemm = ctx->device->pipeline_matmul_volta_f16 != nullptr && volta_type &&
+                            src1->type == GGML_TYPE_F32 &&
+                            ggml_vk_dim01_contiguous(src0) && ggml_vk_dim01_contiguous(src1) &&
+                            ne02 == 1 && ne03 == 1 && ne12 == 1 && ne13 == 1 &&
+                            ne01 % 128 == 0 && ne11 % 128 == 0 && ne10 % 32 == 0 &&
+                            dst->nb[1] % sizeof(float) == 0 &&
+                            ggml_vk_get_to_fp16(ctx, src0->type) != nullptr;
+    const ggml_type y_kernel_type = volta_gemm ? f16_type :
+                                    ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
                                         (ggml_prec)dst->op_params[0], false, can_quantize_y, prefer_f16_b);
 
     const bool quantize_y       = y_kernel_type == GGML_TYPE_Q8_1;
@@ -6392,7 +6416,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     const std::vector<vk_matmul_pipeline_pair>* mmp_map =
         ggml_vk_get_mul_mat_mat_pipeline_map(ctx, src0->type, y_kernel_type, (ggml_prec)dst->op_params[0]);
 
-    const bool qx_needs_dequant = mmp_map == nullptr || x_non_contig;
+    const bool qx_needs_dequant = mmp_map == nullptr || x_non_contig || volta_gemm;
     const bool qy_needs_dequant = y_needs_reformat;
 
     if (qx_needs_dequant) {
@@ -6477,6 +6501,9 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
         }
         if (quantize_y) {
             ggml_pipeline_request_descriptor_sets(ctx, to_q8_1, 1);
+        }
+        if (volta_gemm && split_k == 1) {
+            ggml_pipeline_request_descriptor_sets(ctx, ctx->device->pipeline_matmul_volta_f16, 1);
         }
         if (split_k > 1) {
             ggml_pipeline_request_descriptor_sets(ctx, ctx->device->pipeline_matmul_split_k_reduce, 1);
@@ -6583,15 +6610,23 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
         : (uint64_t)src1->nb[1];
 
     // compute
-    ggml_vk_matmul(
-        ctx, subctx, pipeline,
-        { d_X, x_buf_offset, x_range }, { d_Y, y_buf_offset, y_range },
-        ggml_vk_subbuffer(ctx, d_D, d_buf_offset), { ctx->prealloc_split_k, 0, d_sz * split_k },
-        ne01, ne11, ne10,
-        ne10, ne10, stride_d, stride_batch_x, stride_batch_y, stride_batch_d,
-        split_k, ne12*ne13, ne02, ne12, r2, r3, padded_n,
-        b_col_bytes, (uint64_t)dst->nb[1]
-    );  // NOLINT
+    if (volta_gemm && split_k == 1) {
+        const std::array<uint32_t, 6> pc = { (uint32_t)ne01, (uint32_t)ne11, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)ne10, stride_d };
+        ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_matmul_volta_f16,
+                                  { vk_subbuffer{ d_X, x_buf_offset, x_range }, vk_subbuffer{ d_Y, y_buf_offset, y_range },
+                                    ggml_vk_subbuffer(ctx, d_D, d_buf_offset) },
+                                  pc, { (uint32_t)ne11, (uint32_t)ne01, 1 });
+    } else {
+        ggml_vk_matmul(
+            ctx, subctx, pipeline,
+            { d_X, x_buf_offset, x_range }, { d_Y, y_buf_offset, y_range },
+            ggml_vk_subbuffer(ctx, d_D, d_buf_offset), { ctx->prealloc_split_k, 0, d_sz * split_k },
+            ne01, ne11, ne10,
+            ne10, ne10, stride_d, stride_batch_x, stride_batch_y, stride_batch_d,
+            split_k, ne12*ne13, ne02, ne12, r2, r3, padded_n,
+            b_col_bytes, (uint64_t)dst->nb[1]
+        );  // NOLINT
+    }
 
     if (x_non_contig || qx_needs_dequant) {
         ctx->prealloc_x_need_sync = true;

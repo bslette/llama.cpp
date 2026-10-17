@@ -9635,6 +9635,13 @@ static const ggml_type other_types[] = {
 // Test cases for evaluation: should try to cover edge cases while using small input sizes to keep the runtime low
 static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
+
+    // whole 128x128 tiles (the Vulkan Volta f16 GEMM path on NVK)
+    for (ggml_type t : {GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K, GGML_TYPE_Q6_K, GGML_TYPE_IQ4_NL}) {
+        test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 256, 128, 256, {1, 1}, {1, 1}));
+        test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 512, 256, 1024, {1, 1}, {1, 1}));
+        test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, 128, 384, 2048, {1, 1}, {1, 1}));
+    }
     std::default_random_engine rng(0);
 
     // unary ops
@@ -12238,7 +12245,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
 
     for (int bs : {1, 2, 3, 4, 5, 8, 512}) {
         for (ggml_type type_a : all_types) {
-            for (ggml_type type_b : {GGML_TYPE_F32}) {
+            for (ggml_type type_b : {GGML_TYPE_F32, GGML_TYPE_F16}) {  // local experiment: f16 B
                 test_cases.emplace_back(new test_mul_mat(type_a, type_b, 4096, bs, 14336, {1,  1}, {1, 1}));
             }
         }
