@@ -5,30 +5,39 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer A {block_iq4_xs data_a[];};
-layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+layout (binding = 0) readonly buffer A16 {block_iq4_xs_packed16 data_a16[];};
+layout (binding = 1) writeonly buffer D {uvec4 data_b4[];};   // 8 f16 per element
 
+// Each invocation writes chunks of 8 consecutive f16 as one 16-byte store each, so a subgroup
+// writes 512 contiguous bytes per store.  A 32-value sub-block is 4 chunks: low nibbles of its
+// qs[0..7], low of qs[8..15], high of qs[0..7], high of qs[8..15].  The dispatch is unchanged:
+// a workgroup covers 32 super-blocks (8192 values), 4 chunks per invocation.
 void main() {
-    // Each thread handles 1 subblock (1 scale and 32 quantized values)
-    const uint ib = gl_WorkGroupID.x * 32 + gl_LocalInvocationID.x / 8;
-
     init_iq_shmem(gl_WorkGroupSize);
 
-    if (ib >= p.nel / 256) {
-        return;
-    }
+    [[unroll]] for (uint h = 0; h < 4; h++) {
+        const uint c = gl_WorkGroupID.x * 1024 + h * 256 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
+            return;
+        }
+        const uint ib = c / 32;
+        const uint ib32 = (c % 32) / 4;
+        const uint t = c % 4;
 
-    const uint ib32 = gl_LocalInvocationID.x % 8;
+        const float d = float(data_a[ib].d);
+        // Scales are 6 bits
+        const uint scale = ((data_a[ib].scales_l[ib32/2] >> (4 * (ib32 & 1))) & 0xF)
+                         | (((data_a[ib].scales_h >> (2 * ib32)) & 3) << 4);
+        const float dl = d * (int(scale) - 32);
 
-    const float d = float(data_a[ib].d);
-    // Scales are 6 bits
-    const uint scale = ((data_a[ib].scales_l[ib32/2] >> (4 * (ib32 & 1))) & 0xF)
-                     | (((data_a[ib].scales_h >> (2 * ib32)) & 3) << 4);
-    const float dl = d * (int(scale) - 32);
-
-    const uint b_idx = 256 * ib + 32 * ib32;
-    const uint q_idx = 16 * ib32;
-    [[unroll]] for (uint l = 0; l < 16; ++l) {
-        data_b[b_idx + l +  0] = D_TYPE(dl * kvalues_iq4nl[data_a[ib].qs[q_idx + l] & 0xF]);
-        data_b[b_idx + l + 16] = D_TYPE(dl * kvalues_iq4nl[data_a[ib].qs[q_idx + l] >>  4]);
+        const uint q16 = 8 * ib32 + (t & 1) * 4;
+        const uint q0 = uint(data_a16[ib].qs[q16 + 0]) | (uint(data_a16[ib].qs[q16 + 1]) << 16);
+        const uint q1 = uint(data_a16[ib].qs[q16 + 2]) | (uint(data_a16[ib].qs[q16 + 3]) << 16);
+        const uint sh = (t >> 1) * 4;
+        const uvec4 b0 = unpack8((q0 >> sh) & 0x0F0F0F0F);
+        const uvec4 b1 = unpack8((q1 >> sh) & 0x0F0F0F0F);
+        const vec4 v0 = vec4(kvalues_iq4nl[b0.x], kvalues_iq4nl[b0.y], kvalues_iq4nl[b0.z], kvalues_iq4nl[b0.w]) * dl;
+        const vec4 v1 = vec4(kvalues_iq4nl[b1.x], kvalues_iq4nl[b1.y], kvalues_iq4nl[b1.z], kvalues_iq4nl[b1.w]) * dl;
+        data_b4[c] = uvec4(packHalf2x16(v0.xy), packHalf2x16(v0.zw), packHalf2x16(v1.xy), packHalf2x16(v1.zw));
     }
 }

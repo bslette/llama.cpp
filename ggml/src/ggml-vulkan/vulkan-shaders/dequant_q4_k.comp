@@ -5,26 +5,26 @@
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer A {A_TYPE data_a[];};
-layout (binding = 1) writeonly buffer D {D_TYPE data_b[];};
+layout (binding = 1) writeonly buffer D {uvec4 data_b4[];};   // 8 f16 per element
 
+// Coalesced: each invocation produces 8 consecutive values (one group of a 256-value super-block)
+// and writes them as one 16-byte store, so a subgroup writes 512 contiguous bytes per store.
+// The dispatch is unchanged: a 32-invocation workgroup covers 256 super-blocks (8192 groups).
 void main() {
-    [[unroll]] for (uint wgy = 0; wgy < 256; wgy++) {
-        const uint ib = gl_WorkGroupID.x * 256 + wgy;
-        if (ib >= p.nel / QUANT_K) {
+    for (uint it = 0; it < 256; it++) {
+        const uint c = gl_WorkGroupID.x * 8192 + it * 32 + gl_LocalInvocationID.x;
+        if (c * 8 >= p.nel) {
             return;
         }
-
-        const uint tid = gl_LocalInvocationID.x;
-        const uint il = tid / 8;
-        const uint ir = tid % 8;
+        const uint ib = c / 32;   // super-block
+        const uint g = c % 32;    // group of 8 values in it
+        float v[8];
+        const uint il = g / 8;
+        const uint hf = (g % 8) / 4;
+        const uint r0 = 8 * (g % 4);
         const uint is = 2 * il;
-        const uint n = 4;
-
-        const FLOAT_TYPE dall = FLOAT_TYPE(data_a[ib].dm.x);
-        const FLOAT_TYPE dmin = FLOAT_TYPE(data_a[ib].dm.y);
-
-        const uint y_idx = ib * QUANT_K + 64 * il + n * ir;
-        const uint qs_idx = 32*il + n * ir;
+        const float dall = float(data_a[ib].dm.x);
+        const float dmin = float(data_a[ib].dm.y);
 
         uint scidx0 = (is < 4) ? is : (is + 4);
         uint scidx1 = (is < 4) ? is : (is - 4);
@@ -36,33 +36,26 @@ void main() {
         uint mbidxshift0 = (is < 4) ? 0 : 4;
         uint mbidxmask1 = (is < 4) ? 0x30 : 0xC0;
         uint mbidxshift1 = (is < 4) ? 0 : 2;
-
-        uint8_t sc = uint8_t((data_a[ib].scales[scidx0] & 0xF) | ((data_a[ib].scales[scidx1] & scidxmask1) >> scidxshift1));
-        uint8_t mbyte = uint8_t((data_a[ib].scales[mbidx0] & mbidxmask0) >> mbidxshift0 | ((data_a[ib].scales[mbidx1] & mbidxmask1) >> mbidxshift1));
-
-        const FLOAT_TYPE d1 = dall * sc;
-        const FLOAT_TYPE m1 = dmin * mbyte;
+        uint sc = (data_a[ib].scales[scidx0] & 0xF) | ((data_a[ib].scales[scidx1] & scidxmask1) >> scidxshift1);
+        uint mbyte = (data_a[ib].scales[mbidx0] & mbidxmask0) >> mbidxshift0 | ((data_a[ib].scales[mbidx1] & mbidxmask1) >> mbidxshift1);
+        const float d1 = dall * float(uint8_t(sc));
+        const float m1 = dmin * float(uint8_t(mbyte));
 
         scidx0 = (is < 4) ? is + 1 : (is + 5);
         scidx1 = (is < 4) ? is + 1 : (is - 3);
-        scidxmask1 = (is < 4) ? 0x30 : 0xC0;
-        scidxshift1 = (is < 4) ? 0 : 2;
         mbidx0 = is + 5;
         mbidx1 = (is < 4) ? is + 5 : is + 1;
-        mbidxmask0 = (is < 4) ? 0xF : 0xF0;
-        mbidxshift0 = (is < 4) ? 0 : 4;
-        mbidxmask1 = (is < 4) ? 0x30 : 0xC0;
-        mbidxshift1 = (is < 4) ? 0 : 2;
+        sc = (data_a[ib].scales[scidx0] & 0xF) | ((data_a[ib].scales[scidx1] & scidxmask1) >> scidxshift1);
+        mbyte = (data_a[ib].scales[mbidx0] & mbidxmask0) >> mbidxshift0 | ((data_a[ib].scales[mbidx1] & mbidxmask1) >> mbidxshift1);
+        const float d2 = dall * float(uint8_t(sc));
+        const float m2 = dmin * float(uint8_t(mbyte));
 
-        sc = uint8_t((data_a[ib].scales[scidx0] & 0xF) | ((data_a[ib].scales[scidx1] & scidxmask1) >> scidxshift1));
-        mbyte = uint8_t((data_a[ib].scales[mbidx0] & mbidxmask0) >> mbidxshift0 | ((data_a[ib].scales[mbidx1] & mbidxmask1) >> mbidxshift1));
-
-        const FLOAT_TYPE d2 = dall * sc;
-        const FLOAT_TYPE m2 = dmin * mbyte;
-
-        [[unroll]] for (uint l = 0; l < n; ++l) {
-            data_b[y_idx + l     ] = D_TYPE(d1 * FLOAT_TYPE(data_a[ib].qs[qs_idx + l] & 0xF) - m1);
-            data_b[y_idx + l + 32] = D_TYPE(d2 * FLOAT_TYPE(data_a[ib].qs[qs_idx + l] >>  4) - m2);
+        const float dh = hf == 0 ? d1 : d2;
+        const float mh = hf == 0 ? m1 : m2;
+        [[unroll]] for (uint j = 0; j < 8; j++) {
+            v[j] = dh * float((data_a[ib].qs[32 * il + r0 + j] >> (4 * hf)) & 0xF) - mh;
         }
+        data_b4[c] = uvec4(packHalf2x16(vec2(v[0], v[1])), packHalf2x16(vec2(v[2], v[3])),
+                           packHalf2x16(vec2(v[4], v[5])), packHalf2x16(vec2(v[6], v[7])));
     }
 }
