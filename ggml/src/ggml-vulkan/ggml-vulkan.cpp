@@ -3024,7 +3024,10 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q3_K][i], "mul_mat_vec_q3_k_q8_1_f32", arr_dmmv_q3_k_q8_1_f32_len[reduc], arr_dmmv_q3_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q4_K][i], "mul_mat_vec_q4_k_q8_1_f32", arr_dmmv_q4_k_q8_1_f32_len[reduc], arr_dmmv_q4_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q5_K][i], "mul_mat_vec_q5_k_q8_1_f32", arr_dmmv_q5_k_q8_1_f32_len[reduc], arr_dmmv_q5_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1}, 1, true, use_subgroups, subgroup_size_int);
-                ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q6_K][i], "mul_mat_vec_q6_k_q8_1_f32", arr_dmmv_q6_k_q8_1_f32_len[reduc], arr_dmmv_q6_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1}, 1, true, use_subgroups, subgroup_size_int);
+                const bool q6_k_bda = device->mmvq_q6_k_bda && reduc == SHADER_REDUCTION_MODE_SUBGROUP;
+                const uint64_t q6_k_len = q6_k_bda ? mul_mat_vec_q6_k_q8_1_f32_subgroup_no_shmem_bda_len : arr_dmmv_q6_k_q8_1_f32_len[reduc];
+                const void * q6_k_data = q6_k_bda ? mul_mat_vec_q6_k_q8_1_f32_subgroup_no_shmem_bda_data : arr_dmmv_q6_k_q8_1_f32_data[reduc];
+                ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q6_K][i], "mul_mat_vec_q6_k_q8_1_f32", q6_k_len, q6_k_data, "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1}, 1, true, use_subgroups, subgroup_size_int);
 
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_IQ1_S][i], "mul_mat_vec_iq1_s_q8_1_f32", arr_dmmv_iq1_s_q8_1_f32_len[reduc], arr_dmmv_iq1_s_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_iq_int(i), 1, 1}, {wg_size_subgroup_int, 1*rm_iq_int(i), i+1}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_IQ1_M][i], "mul_mat_vec_iq1_m_q8_1_f32", arr_dmmv_iq1_m_q8_1_f32_len[reduc], arr_dmmv_iq1_m_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_iq_int(i), 1, 1}, {wg_size_subgroup_int, 1*rm_iq_int(i), i+1}, 1, true, use_subgroups, subgroup_size_int);
@@ -3041,7 +3044,7 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_Q3_K], "mul_mat_vec_q3_k_q8_1_f32_glu", arr_dmmv_q3_k_q8_1_f32_len[reduc], arr_dmmv_q3_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_Q4_K], "mul_mat_vec_q4_k_q8_1_f32_glu", arr_dmmv_q4_k_q8_1_f32_len[reduc], arr_dmmv_q4_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_Q5_K], "mul_mat_vec_q5_k_q8_1_f32_glu", arr_dmmv_q5_k_q8_1_f32_len[reduc], arr_dmmv_q5_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
-                    ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_Q6_K], "mul_mat_vec_q6_k_q8_1_f32_glu", arr_dmmv_q6_k_q8_1_f32_len[reduc], arr_dmmv_q6_k_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
+                    ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_Q6_K], "mul_mat_vec_q6_k_q8_1_f32_glu", q6_k_len, q6_k_data, "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_kq_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_kq_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_IQ1_S], "mul_mat_vec_iq1_s_q8_1_f32_glu", arr_dmmv_iq1_s_q8_1_f32_len[reduc], arr_dmmv_iq1_s_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_iq_int(i), 1, 1}, {wg_size_subgroup_int, 1*rm_iq_int(i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_IQ1_M], "mul_mat_vec_iq1_m_q8_1_f32_glu", arr_dmmv_iq1_m_q8_1_f32_len[reduc], arr_dmmv_iq1_m_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_iq_int(i), 1, 1}, {wg_size_subgroup_int, 1*rm_iq_int(i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_mul_mat_vec_q8_1_glu[GGML_TYPE_IQ4_XS], "mul_mat_vec_iq4_xs_q8_1_f32_glu", arr_dmmv_iq4_xs_q8_1_f32_len[reduc], arr_dmmv_iq4_xs_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {rg * rm_int_n(1*rm_glu_int, i), 1, 1}, {wg_size_subgroup_int, rm_int_n(1*rm_glu_int, i), i+1, 1}, 1, true, use_subgroups, subgroup_size_int);
@@ -4930,6 +4933,9 @@ vk_device ggml_vk_get_device(size_t idx) {
         // each workgroup, every one on its own rows.
         device->mmvq_row_groups = (device->driver_id == vk::DriverId::eMesaNvk &&
                                    strstr(device->properties.deviceName, " GV1") != nullptr) ? 4 : 1;
+        // q6_K blocks are only 2-byte aligned; with 64-bit addresses NAK folds the
+        // constant offsets of their loads (it can't with 32-bit buffer offsets)
+        device->mmvq_q6_k_bda = device->mmvq_row_groups > 1 && device->buffer_device_address && device->shader_int64;
 
         ggml_vk_load_shaders(device);
 
@@ -6712,7 +6718,9 @@ static bool ggml_vk_should_use_mmvq(const vk_device& device, uint32_t m, uint32_
 
     // q6_k only has 2-byte alignment which makes it somewhat problematic,
     // using MMVQ is only a win on Intel.
-    bool mmvq_q6 = device->vendor_id == VK_VENDOR_ID_INTEL;
+    bool mmvq_q6 = device->vendor_id == VK_VENDOR_ID_INTEL ||
+                   (device->driver_id == vk::DriverId::eMesaNvk &&
+                    strstr(device->properties.deviceName, " GV1") != nullptr);
     if (src0_type == GGML_TYPE_Q6_K && !mmvq_q6) {
         return false;
     }
@@ -7054,6 +7062,8 @@ static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context&
 
     ggml_pipeline_request_descriptor_sets(ctx, dmmv, CEIL_DIV(ne12 * ne13, ctx->device->properties.limits.maxComputeWorkGroupCount[1]));
 
+    const vk::DeviceAddress a_addr = d_X.buffer->bda_addr + d_X.offset;
+
     uint32_t base_work_group_y = 0;
     while (base_work_group_y < ne12 * ne13) {
 
@@ -7064,6 +7074,7 @@ static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context&
             fusion_flags, base_work_group_y,
             (uint32_t)ne02, (uint32_t)ne12, (uint32_t)r2, (uint32_t)r3,
             a_offset_x, gate_delta,
+            (uint32_t)a_addr, (uint32_t)(a_addr >> 32),
         };
         ggml_vk_dispatch_pipeline(ctx, subctx, dmmv,
                                   {

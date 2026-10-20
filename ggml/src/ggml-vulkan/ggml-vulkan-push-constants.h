@@ -33,6 +33,10 @@ struct vk_mat_vec_push_constants {
     // distance from A to the gate matrix, both in A blocks
     uint32_t a_offset_x;
     uint32_t gate_delta;
+    // device address of the A binding, for shaders that read A through
+    // buffer_reference pointers
+    uint32_t a_addr_lo;
+    uint32_t a_addr_hi;
 };
 
 struct vk_mat_vec_p021_push_constants {
