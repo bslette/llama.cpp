@@ -40,8 +40,11 @@ generation and launch shape, not exotic instructions.
    gemmbench (`recovered/.../gemmbench`): smem bank conflicts, ldmatrix-like
    access, stall reasons. Compare SASS of cutlass_70_tensorop_h884gemm
    128x128. Consider 256x128 tiles and deeper K prefetch.
-6. **pp flash attention and rope/rms_norm:** apply the subgroup-reduction
-   approach; check FA coopmat path occupancy.
+6. **pp flash attention and rope/rms_norm.** NVK's pp FA already uses tensor
+   cores (coopmat1, 80 HMMA), while CUDA's uses none (`flash_attn_tile`),
+   yet NVK is slower (110 vs 84 ms). First try forcing `FA_SCALAR` for pp on
+   NVK Volta. Then check coopmat FA occupancy and smem use. Apply the
+   subgroup-reduction approach to rope and rms_norm.
 7. **Upstreaming:** once freedesktop permission arrives, push
    `nak-idp4a-imm`, then the control-flow stall fix, then the rest (see
    UPSTREAM.md).

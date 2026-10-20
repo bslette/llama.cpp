@@ -62,3 +62,16 @@ where it was committed, and what failed.
   MUL_MAT n=1..8 1505/1505. Pushed.
 - Status line configured (context / 5-hour / weekly percentages).
 - Wrote these notes (docs/nvk-perf) and committed them to `volta-nvk`.
+
+## 2026-10-20 (later): tensor-core usage audit
+
+- Counted HMMA/IMMA in NAK dumps of every shader used in a Q4_0 pp512 run
+  (`/var/tmp/fadump.sh`), and compared with the CUDA nsys kernel list.
+- pp weight GEMMs: both stacks use HMMA.884 with f16 accumulators (cuBLAS
+  cutlass_70 h884 and volta_h884gemm_64x64, against NVK mul_mm_volta_f16).
+  The 2 vs 5 TFLOPS gap is kernel quality, not tensor-core use.
+- pp flash attention: NVK uses tensor cores (coopmat1, 80 HMMA) and CUDA
+  does not (`flash_attn_tile`), yet NVK is slower (110 vs 84 ms).
+  CUDA skips its MMA FA on Xavier because `volta_mma_available` checks
+  arch == 700 and sm_72 reports 720 (see UPSTREAM.md).
+- tg: neither stack uses tensor cores (IDP.4A mat-vec, scalar/tile FA).

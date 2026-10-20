@@ -29,6 +29,7 @@ Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
 | rms_norm smem tree reduction (9 barriers) | `3e3e3d8` | **ready**: needs numbers on another GPU |
 | MMVQ per-workgroup overhead on small K: multiple subgroups per WG on separate rows, no smem | `ad1c0b8` (gated to NVK GV1xx) | **needs work**: try on other vendors before widening the gate |
 | MMVQ gate/up/SWIGLU fusion (CUDA has it, Vulkan didn't) | `854e05d` | **needs work**: only the NO_SHMEM path; non-NVK paths and MUL_MAT_ID not covered |
+| CUDA backend: `volta_mma_available(cc)` requires `ggml_cuda_highest_compiled_arch(cc) == 700`. An sm_72 (Xavier) build reports 720, so Xavier never gets the MMA flash-attention kernel and uses `flash_attn_tile` (no tensor cores) even for pp512. Confirmed in the nsys profile | none yet: test `>= VOLTA && < TURING` on the board | **report** |
 | Volta f16 GEMM path, int8 coopmat probe | `b4bb19c`, `005a3a5` | **needs work**: depends on Mesa Volta coopmat landing |
 
 ## Local / board (not upstream, keep in mind)
