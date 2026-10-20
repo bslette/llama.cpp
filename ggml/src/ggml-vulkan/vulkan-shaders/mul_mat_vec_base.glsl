@@ -37,6 +37,8 @@ layout (push_constant) uniform parameter
     uint ne12;
     uint broadcast2;
     uint broadcast3;
+    uint a_offset_x;
+    uint gate_delta;
 #endif
 } p;
 

@@ -43,6 +43,15 @@ vec2 cache_b_ds;
 
 #include "mul_mat_vecq_funcs.glsl"
 
+#if !defined(MUL_MAT_ID) && defined(USE_SUBGROUP_ADD_NO_SHMEM)
+// MUL_MAT(up) + MUL_MAT(gate) + SWIGLU: the gate matrix is read through the A
+// binding, gate_delta blocks after A, and the result is silu(gate) * up.
+#define GLU_FUSION
+layout (constant_id = 3) const bool FUSE_GLU = false;
+FLOAT_TYPE temp_gate[NUM_COLS][NUM_ROWS];
+uint gate_delta;
+#endif
+
 void iter(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const uint first_row, const uint num_rows, const uint col, const uint b_qs_idx) {
     [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
         // Preload data_b block
@@ -84,6 +93,11 @@ void iter(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const uint first_row, const
             ibi += p.ncols;
 
             temp[j][n] += mmvq_dot_product(a_block_idx, b_qs_idx);
+#ifdef GLU_FUSION
+            if (FUSE_GLU) {
+                temp_gate[j][n] += mmvq_dot_product(a_block_idx + gate_delta, b_qs_idx);
+            }
+#endif
         }
     }
 }
@@ -92,6 +106,10 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
     const uint tid = ROW_TID;
 
     get_offsets(a_offset, b_offset, d_offset);
+#ifdef GLU_FUSION
+    a_offset += p.a_offset_x;
+    gate_delta = p.gate_delta * (QUANT_K / QUANT_K_Q8_1);
+#endif
     a_offset *= QUANT_K / QUANT_K_Q8_1;
     b_offset /= QUANT_K_Q8_1;
 
@@ -100,6 +118,9 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
     [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
         [[unroll]] for (uint n = 0; n < num_rows; ++n) {
             temp[j][n] = FLOAT_TYPE(0.0f);
+#ifdef GLU_FUSION
+            temp_gate[j][n] = FLOAT_TYPE(0.0f);
+#endif
         }
     }
 
@@ -134,6 +155,20 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
         iter(temp, first_row, num_rows, col, b_qs_idx);
     }
 
+#ifdef GLU_FUSION
+    if (FUSE_GLU) {
+        [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
+            [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+                const FLOAT_TYPE up = subgroupAdd(temp[j][n]);
+                const FLOAT_TYPE gate = subgroupAdd(temp_gate[j][n]);
+                if (tid == 0) {
+                    data_d[j*p.batch_stride_d + d_offset + first_row + n] = D_TYPE(gate / (1.0f + exp(-gate)) * up);
+                }
+            }
+        }
+        return;
+    }
+#endif
     reduce_result(temp, d_offset, first_row, num_rows, tid);
 }
 

@@ -29,6 +29,10 @@ struct vk_mat_vec_push_constants {
     uint32_t ne12;
     uint32_t broadcast2;
     uint32_t broadcast3;
+    // MUL_MAT + MUL_MAT + GLU fusion: A's first block in the binding, and the
+    // distance from A to the gate matrix, both in A blocks
+    uint32_t a_offset_x;
+    uint32_t gate_delta;
 };
 
 struct vk_mat_vec_p021_push_constants {
