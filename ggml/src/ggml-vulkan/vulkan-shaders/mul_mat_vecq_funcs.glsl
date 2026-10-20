@@ -4,6 +4,41 @@
 
 #include "types.glsl"
 
+#ifdef A_BDA
+// A_BDA: A is read through 64-bit pointers, for blocks that are only 2-byte
+// aligned. The groups of 16 bytes read below start at multiples of 16 bytes
+// within the block, so each is read as three aligned 8-byte loads and
+// realigned, instead of 2-byte loads. With 64-bit addresses the constant
+// offsets (field offsets, the second and third word) fold into the loads; with
+// 32-bit buffer offsets the compiler can't fold them, because the 32-bit add
+// might wrap.
+#if defined(DATA_A_Q3_K)
+#define A_BLOCK_SIZE (QUANT_K_Q3_K/8 + QUANT_K_Q3_K/4 + 12 + 2)
+#elif defined(DATA_A_Q6_K)
+#define A_BLOCK_SIZE (QUANT_K_Q6_K/2 + QUANT_K_Q6_K/4 + QUANT_K_Q6_K/16 + 2)
+#endif
+
+layout (buffer_reference, std430, buffer_reference_align = 8) readonly buffer AWords {uvec2 w[3];};
+layout (buffer_reference, std430, buffer_reference_align = 2) readonly buffer ABlock {A_TYPE b;};
+
+uint64_t a_block_addr(const uint ib_k) {
+    return packUint2x32(uvec2(p.a_addr_lo, p.a_addr_hi)) + uint64_t(ib_k * A_BLOCK_SIZE);
+}
+
+// 16 bytes at addr + field_offset, where field_offset is a multiple of 8
+uvec4 load16_align2(const uint64_t addr, const uint field_offset) {
+    AWords words = AWords((addr & ~uint64_t(7)) + field_offset);
+    const uvec2 w0 = words.w[0];
+    const uvec2 w1 = words.w[1];
+    const uvec2 w2 = words.w[2];
+    const uint r = uint(addr) % 8; // 0, 2, 4 or 6
+
+    const uvec4 lo = r < 4 ? uvec4(w0, w1) : uvec4(w0.y, w1, w2.x);
+    const uvec4 hi = r < 4 ? uvec4(w0.y, w1, w2.x) : uvec4(w1, w2);
+    return (r & 2) != 0 ? (lo >> 16) | (hi << 16) : lo;
+}
+#endif
+
 #if defined(DATA_A_Q2_0)
 FLOAT_TYPE get_dm(uint ib) {
     return FLOAT_TYPE(data_a[ib / 2].d);
@@ -240,7 +275,7 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
 #endif
 
 #if defined(DATA_A_Q3_K)
-// 2-byte loads for Q3_K blocks (110 bytes)
+// 2-byte loads for Q3_K blocks (110 bytes), or 8-byte loads with A_BDA
 i32vec4 repack4(uint ib, uint iqs) {
     const uint ib_k = ib / 8;
     const uint iqs_k = (ib % 8) * 8 + iqs;
@@ -249,6 +284,11 @@ i32vec4 repack4(uint ib, uint iqs) {
     const uint qs_shift = ((iqs_k % 32) / 8) * 2;
     const uint hm_shift = iqs_k / 8;
 
+#ifdef A_BDA
+    const uint64_t block_addr = a_block_addr(ib_k);
+    const uvec4 qs = load16_align2(block_addr + qs_idx * 4, QUANT_K_Q3_K/8);
+    const uvec4 hmask = load16_align2(block_addr + iqs * 4, 0);
+#else
     const uvec4 qs = uvec4( uint32_t(data_a_packed16[ib_k].qs[qs_idx * 2    ]) |
                            (uint32_t(data_a_packed16[ib_k].qs[qs_idx * 2 + 1]) << 16),
                             uint32_t(data_a_packed16[ib_k].qs[qs_idx * 2 + 2]) |
@@ -266,6 +306,7 @@ i32vec4 repack4(uint ib, uint iqs) {
                               (uint32_t(data_a_packed16[ib_k].hmask[iqs * 2 + 5]) << 16),
                                uint32_t(data_a_packed16[ib_k].hmask[iqs * 2 + 6]) |
                               (uint32_t(data_a_packed16[ib_k].hmask[iqs * 2 + 7]) << 16));
+#endif
 
     // bitwise OR to add 4 if hmask is set, subtract later
     const uint vals0 = ((    qs.x >> qs_shift) & 0x03030303) |
@@ -290,9 +331,16 @@ float get_d_scale(uint ib, uint iqs) {
     const uint iqs_k = (ib % 8) * 8 + iqs;
     const uint is = iqs_k / 4;
 
+#ifdef A_BDA
+    ABlock block = ABlock(a_block_addr(ib_k));
+    const int8_t scale = int8_t(((block.b.scales[is % 8      ] >> (4 * (is / 8))) & 0x0F0F) |
+                               (((block.b.scales[8 + (is % 4)] >> (2 * (is / 4))) & 0x0303) << 4));
+    return float(block.b.d) * float(scale - 32);
+#else
     const int8_t scale = int8_t(((data_a[ib_k].scales[is % 8      ] >> (4 * (is / 8))) & 0x0F0F) |
                                (((data_a[ib_k].scales[8 + (is % 4)] >> (2 * (is / 4))) & 0x0303) << 4));
     return float(data_a[ib_k].d) * float(scale - 32);
+#endif
 }
 
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
@@ -382,34 +430,7 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
 #endif
 
 #if defined(DATA_A_Q6_K)
-// Q6_K blocks (210 bytes) are only 2-byte aligned, so the default is 2-byte loads.
-#ifdef A_BDA
-// With A_BDA, A is read through 64-bit pointers. The ql/qh groups read here
-// start at multiples of 16 bytes within the block, so each 16 bytes is read as
-// three aligned 8-byte loads and realigned, instead of eight 2-byte loads.
-// With 64-bit addresses the constant offsets (field offsets, the second and
-// third word) fold into the loads; with 32-bit buffer offsets the compiler
-// can't fold them, because the 32-bit add might wrap.
-layout (buffer_reference, std430, buffer_reference_align = 8) readonly buffer Q6KWords {uvec2 w[3];};
-layout (buffer_reference, std430, buffer_reference_align = 2) readonly buffer Q6KBlock {block_q6_K b;};
-
-uint64_t q6_k_block_addr(const uint ib_k) {
-    return packUint2x32(uvec2(p.a_addr_lo, p.a_addr_hi)) + uint64_t(ib_k * (QUANT_K_Q6_K/2 + QUANT_K_Q6_K/4 + QUANT_K_Q6_K/16 + 2));
-}
-
-// addr + field_offset, where field_offset is a multiple of 8
-uvec4 load16_align2(const uint64_t addr, const uint field_offset) {
-    Q6KWords words = Q6KWords((addr & ~uint64_t(7)) + field_offset);
-    const uvec2 w0 = words.w[0];
-    const uvec2 w1 = words.w[1];
-    const uvec2 w2 = words.w[2];
-    const uint r = uint(addr) % 8; // 0, 2, 4 or 6
-
-    const uvec4 lo = r < 4 ? uvec4(w0, w1) : uvec4(w0.y, w1, w2.x);
-    const uvec4 hi = r < 4 ? uvec4(w0.y, w1, w2.x) : uvec4(w1, w2);
-    return (r & 2) != 0 ? (lo >> 16) | (hi << 16) : lo;
-}
-#endif
+// 2-byte loads for Q6_K blocks (210 bytes), or 8-byte loads with A_BDA
 
 i32vec4 repack4(uint ib, uint iqs) {
     const uint ib_k = ib / 8;
@@ -422,7 +443,7 @@ i32vec4 repack4(uint ib, uint iqs) {
     const uint qh_shift = ((iqs_k % 32) / 8) * 2;
 
 #ifdef A_BDA
-    const uint64_t block_addr = q6_k_block_addr(ib_k);
+    const uint64_t block_addr = a_block_addr(ib_k);
     const uvec4 ql = load16_align2(block_addr + ql_idx * 4, 0);
     const uvec4 qh = load16_align2(block_addr + qh_idx * 4, QUANT_K_Q6_K/2);
 #else
@@ -466,7 +487,7 @@ float get_d_scale(uint ib, uint iqs) {
     const uint ib_k = ib / 8;
     const uint iqs_k = (ib % 8) * 8 + iqs;
 #ifdef A_BDA
-    Q6KBlock block = Q6KBlock(q6_k_block_addr(ib_k));
+    ABlock block = ABlock(a_block_addr(ib_k));
     return float(block.b.d) * float(block.b.scales[iqs_k / 4]);
 #else
     return float(data_a[ib_k].d) * float(data_a[ib_k].scales[iqs_k / 4]);
