@@ -22,17 +22,16 @@ generation and launch shape, not exotic instructions.
 
 ## Plan
 
-00. **Address folding, per-shader (option 2).** Measured with Mesa
-    `df97444` (`NAK_DEBUG=nowrap`, opt-in): tg Q5_K_M +19.6%, Q4_K_M +11.3%,
-    IQ4_XS +4.8%, Q4_0/Q8_0 +0.5%, but q6_K mat-vec +12–15% slower and
-    Q4_1 −3.5%. So do it in llama.cpp, only where it helps: q4_K, q5_K,
-    iq4_xs MMVQ loads through buffer_reference (64-bit) block pointers, so
-    the field/array constants are 64-bit adds NAK folds legally. Watch out:
-    a 32-bit index like `qs[iqs*4 + 1]` is still converted with u2u64 before
-    the multiply, so write constant parts as separate accesses or pointer
-    steps. Also find out why folding slows q6_K (registers/occupancy or
-    schedule) before choosing its layout. Upstreamable; no Mesa change needed.
-    Option 3 (NIR nuw on SSBO offsets) stays a fallback.
+00. **Done 2026-10-20: MMVQ vector loads** (llama.cpp `39da5ea`): Q4_K_M tg
+    45.1 → 52.7, Q5_K_M 38.9 → 48.7, IQ4_XS 52.1 → 57.1. Follow-ups:
+    - Same treatment for the other MMVQ types: q2_K/q3_K/q6_K (16-bit
+      loads now), Q4_0/Q4_1/Q5_x (QUANT_R 2 reads idx and idx+4 from B;
+      restructure so they become one vector), iq1/iq2/iq3.
+    - q6_K lm_head (1.45 ms) uses the non-MMVQ path; try MMVQ q6_K with
+      vector loads.
+    - Dequant and other mat-vec shaders: check NAK dumps for scalar loads.
+    - `NAK_DEBUG=nowrap` (`df97444`) is now mostly redundant; nowrap on top
+      of vector loads is slightly slower.
 
 0. **Done 2026-10-20: GPU L2 caching for NVK on Tegra** (uvmm_sysmem_vol=0 +
    Mesa `972938f`): +12% pp, +11% tg. Follow-ups:

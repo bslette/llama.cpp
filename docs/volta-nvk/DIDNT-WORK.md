@@ -11,6 +11,8 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | Fused gate/up with 2 rows of each matrix per subgroup | same as 1 row | – |
 | Fused gate/up for Q8_0 and IQ4_XS | about −2% (Q8_0 37.8 → 37.1, IQ4_XS 48.0 → 47.3) | extra registers and occupancy loss outweigh the saved dispatch; left disabled |
 | Fold constant address offsets into LDG immediates (unsafe experiment, 78/121 loads) | tg Q4_0 −0.9%, Q8_0 +0.6%, Q6_K lm_head +17% slower | mat-vec is not ALU/issue bound; −8% instructions bought nothing | 
+| ivec2 q8_1 loads for K_PER_ITER 8 (Q8_0 MMVQ) | tg 42.2 → 40.9 | dropped from `39da5ea` |
+| `NAK_DEBUG=nowrap` on top of vector loads | Q4_K_M 52.7 → 51.3, Q5_K_M 48.7 → 48.0 | the fold no longer pays once loads are vectors |
 | Blanket address fold with the L2 on (`NAK_DEBUG=nowrap`) for every shader | q6_K mat-vec +12–15% slower, Q4_1 tg −3.5% | the gain is per shader; apply it only to q4_K/q5_K/iq4_xs |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 

@@ -263,3 +263,31 @@ a blanket fold hurts q6_K and q4_1. A per-shader fix (option 2: 64-bit
 buffer_reference addressing in those MMVQ paths only) is worth doing; it
 would also avoid the q6_K regression, which costs Q4_K_M/Q5_K_M about
 0.65 ms/token (lm_head + q6_K down projections).
+
+## 2026-10-20 (later): option 2 as vector loads, llama.cpp `39da5ea`
+
+NAK dump of the q4_K MMVQ shader: 181 `ld.global...b32` for 60 dot products.
+Every load is scalar because the vectorizer can't prove 16-byte alignment
+(the index goes through `iqs_k % 8`), so each word paid its own 64-bit
+address add. Rather than buffer_reference pointers, read through vector
+views (q4_K/q5_K `packed128`, iq4_xs 8-byte, q8_1_x4 `ivec4`). No wrap
+assumption needed, and it removes the loads as well as the address adds.
+
+q4_K shader: 181 → 58 loads (41 × b128). tg128 (pp512 unchanged):
+
+| model | before | vectors | vectors + nowrap |
+|---|---|---|---|
+| Q4_K_M | 45.1 | **52.7** | 51.3 |
+| Q5_K_M | 38.9 | **48.7** | 48.0 |
+| IQ4_XS | 52.1 | **57.1** | 57.2 |
+| Q4_0 | 58.1 | 58.3 | 58.2 |
+| Q4_1 | 57.3 | 57.3 | 55.3 |
+| Q8_0 | 42.2 | 42.2 (40.9 with an ivec2 B load) | |
+
+Beats the blanket nowrap fold everywhere, and nowrap on top now hurts
+(K-quants) so it stays off. The ivec2 q8_1 load for K_PER_ITER 8 (Q8_0)
+cost 3% and was dropped. Per op: q4_K 5632×2048 207 → 158 µs, q5_K GLU
+476 → 329 µs, iq4_xs 5632×2048 160 → 149 µs; q6_K unaffected (it doesn't
+use MMVQ here). Tests: MUL_MAT n≤8 1536/1536, MUL_MAT_ID 434/434,
+MUL_MAT_VEC_FUSION 1265/1265; PPL Q4_K_M 25.9262 (same), IQ4_XS 26.4761,
+Q8_0 25.2937.
