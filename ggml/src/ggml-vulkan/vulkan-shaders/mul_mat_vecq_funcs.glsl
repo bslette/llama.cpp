@@ -311,7 +311,19 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
 #endif
 
 #if defined(DATA_A_Q4_K) || defined(DATA_A_Q5_K)
-// 4-byte loads for Q4_K blocks (144 bytes) and Q5_K blocks (176 bytes)
+// 16-byte loads for Q4_K blocks (144 bytes) and Q5_K blocks (176 bytes): the
+// header (dm + scales) and each group of four qs/qh words is one 16-byte vector.
+#if defined(DATA_A_Q4_K)
+layout (binding = 0) readonly buffer A_PACKED128 {block_q4_K_packed128 data_a_packed128[];};
+#define A_VEC4(ib, i) data_a_packed128[ib].q4k[i]
+#define QS_VEC4 1
+#else
+layout (binding = 0) readonly buffer A_PACKED128 {block_q5_K_packed128 data_a_packed128[];};
+#define A_VEC4(ib, i) data_a_packed128[ib].q5k[i]
+#define QH_VEC4 1
+#define QS_VEC4 3
+#endif
+
 i32vec4 repack4(uint ib, uint iqs) {
     const uint ib_k = ib / 8;
     const uint iqs_k = (ib % 8) * 8 + iqs;
@@ -319,25 +331,15 @@ i32vec4 repack4(uint ib, uint iqs) {
     const uint qs_idx = (iqs_k / 16) * 8 + (iqs_k % 8);
     const uint qs_shift = ((iqs_k % 16) / 8) * 4;
 
+    // qs_idx and iqs are multiples of 4
+    const uvec4 qs = A_VEC4(ib_k, QS_VEC4 + qs_idx / 4);
 #if defined(DATA_A_Q4_K)
-    const uint32_t vals0 = (data_a_packed32[ib_k].qs[qs_idx    ] >> qs_shift) & 0x0F0F0F0F;
-    const uint32_t vals1 = (data_a_packed32[ib_k].qs[qs_idx + 1] >> qs_shift) & 0x0F0F0F0F;
-    const uint32_t vals2 = (data_a_packed32[ib_k].qs[qs_idx + 2] >> qs_shift) & 0x0F0F0F0F;
-    const uint32_t vals3 = (data_a_packed32[ib_k].qs[qs_idx + 3] >> qs_shift) & 0x0F0F0F0F;
-
-    return i32vec4(vals0, vals1, vals2, vals3);
+    return i32vec4((qs >> qs_shift) & 0x0F0F0F0F);
 #else // defined(DATA_A_Q5_K)
-    const uint qh_idx = iqs;
+    const uvec4 qh = A_VEC4(ib_k, QH_VEC4 + iqs / 4);
     const uint qh_shift = iqs_k / 8;
 
-    return i32vec4(((data_a_packed32[ib_k].qs[qs_idx    ] >> qs_shift) & 0x0F0F0F0F) |
-                  (((data_a_packed32[ib_k].qh[qh_idx    ] >> qh_shift) & 0x01010101) << 4),
-                   ((data_a_packed32[ib_k].qs[qs_idx + 1] >> qs_shift) & 0x0F0F0F0F) |
-                  (((data_a_packed32[ib_k].qh[qh_idx + 1] >> qh_shift) & 0x01010101) << 4),
-                   ((data_a_packed32[ib_k].qs[qs_idx + 2] >> qs_shift) & 0x0F0F0F0F) |
-                  (((data_a_packed32[ib_k].qh[qh_idx + 2] >> qh_shift) & 0x01010101) << 4),
-                   ((data_a_packed32[ib_k].qs[qs_idx + 3] >> qs_shift) & 0x0F0F0F0F) |
-                  (((data_a_packed32[ib_k].qh[qh_idx + 3] >> qh_shift) & 0x01010101) << 4));
+    return i32vec4(((qs >> qs_shift) & 0x0F0F0F0F) | (((qh >> qh_shift) & 0x01010101) << 4));
 #endif
 }
 
@@ -346,9 +348,8 @@ vec2 get_dm_scale(uint ib, uint iqs) {
     const uint iqs_k = (ib % 8) * 8 + iqs;
     const uint is = iqs_k / 8;
 
-    const uvec3 scales = uvec3(data_a_packed32[ib_k].scales[0],
-                               data_a_packed32[ib_k].scales[1],
-                               data_a_packed32[ib_k].scales[2]);
+    const uvec4 header = A_VEC4(ib_k, 0);
+    const uvec3 scales = header.yzw;
     const uint scalesoffs = (is & 3) * 8;
 
     const uint scidx0 = (is < 4) ? 0 : 2;
@@ -362,7 +363,7 @@ vec2 get_dm_scale(uint ib, uint iqs) {
     const uint8_t mbyte = uint8_t(((scales[mbidx0] >> mbidxshift0) & 0xF) | ((scales[1] >> mbidxshift1) & 0x30));
     u8vec2 scale_dm = u8vec2(sc, mbyte);
 
-    return FLOAT_TYPEV2(data_a_packed32[ib_k].dm) * FLOAT_TYPEV2(scale_dm);
+    return FLOAT_TYPEV2(unpackHalf2x16(header.x)) * FLOAT_TYPEV2(scale_dm);
 }
 
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
@@ -449,22 +450,33 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
 #endif
 
 #if defined(DATA_A_IQ4_XS)
+// 8-byte loads for IQ4_XS blocks (136 bytes): header (d, scales_h, scales_l), qs
+struct block_iq4_xs_packed64
+{
+    uvec2 header;
+    uvec2 qs[QUANT_K_IQ4_XS/16];
+};
+layout (binding = 0) readonly buffer A_IQ4_XS_PACKED64 {block_iq4_xs_packed64 data_a_iq4_xs_packed64[];};
+
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
     const uint ib = ib_a / 8;
     const uint ib32 = ib_a % 8;
 
+    const uvec4 qs = uvec4(data_a_iq4_xs_packed64[ib].qs[2 * ib32],
+                           data_a_iq4_xs_packed64[ib].qs[2 * ib32 + 1]);
     int32_t q_sum = 0;
     [[unroll]] for (uint j = 0; j < 4; ++j) {
-        const uint32_t vui = data_a_packed32[ib].qs[4 * ib32 + j];
+        const uint32_t vui = qs[j];
         const i32vec2 qs_a = iq4nl_to_i8x8(vui);
 
         q_sum += dotPacked4x8EXT(qs_a.x, cache_b_qs[j]);
         q_sum += dotPacked4x8EXT(qs_a.y, cache_b_qs[j + 4]);
     }
 
-    const uint sl = (data_a_packed32[ib].scales_l >> (4 * ib32)) & 0xF;
-    const uint sh = (data_a_packed32[ib].scales_h >> (2 * ib32)) & 3;
-    const float d = float(data_a[ib].d) * float(int(sl | (sh << 4)) - 32);
+    const uvec2 header = data_a_iq4_xs_packed64[ib].header;
+    const uint sl = (header.y >> (4 * ib32)) & 0xF;
+    const uint sh = (header.x >> (16 + 2 * ib32)) & 3;
+    const float d = unpackHalf2x16(header.x).x * float(int(sl | (sh << 4)) - 32);
 
     return FLOAT_TYPE(float(cache_b_ds.x) * d * float(q_sum));
 }

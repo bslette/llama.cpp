@@ -38,6 +38,9 @@ uint a_offset, b_offset, d_offset;
 #define ROW_GROUP 0
 #endif
 
+// q8_1 quants as 16-byte vectors
+layout (binding = 1) readonly buffer B_PACKED128 {block_q8_1_x4_packed128 data_b_packed128[];};
+
 int32_t cache_b_qs[K_PER_ITER / 4];
 vec2 cache_b_ds;
 
@@ -69,19 +72,22 @@ void iter(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const uint first_row, const
         cache_b_qs[0] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 2];
         cache_b_qs[1] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 2 + 1];
 #elif K_PER_ITER == 16
-        cache_b_qs[0] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 4    ];
-        cache_b_qs[1] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 4 + 1];
-        cache_b_qs[2] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 4 + 2];
-        cache_b_qs[3] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + b_qs_idx * 4 + 3];
+        const ivec4 qs = data_b_packed128[b_block_idx_outer].qs[b_block_idx_inner * 2 + b_qs_idx];
+        cache_b_qs[0] = qs.x;
+        cache_b_qs[1] = qs.y;
+        cache_b_qs[2] = qs.z;
+        cache_b_qs[3] = qs.w;
 #elif K_PER_ITER == 32
-        cache_b_qs[0] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8    ];
-        cache_b_qs[1] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 1];
-        cache_b_qs[2] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 2];
-        cache_b_qs[3] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 3];
-        cache_b_qs[4] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 4];
-        cache_b_qs[5] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 5];
-        cache_b_qs[6] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 6];
-        cache_b_qs[7] = data_b[b_block_idx_outer].qs[b_block_idx_inner * 8 + 7];
+        const ivec4 qs0 = data_b_packed128[b_block_idx_outer].qs[b_block_idx_inner * 2];
+        const ivec4 qs1 = data_b_packed128[b_block_idx_outer].qs[b_block_idx_inner * 2 + 1];
+        cache_b_qs[0] = qs0.x;
+        cache_b_qs[1] = qs0.y;
+        cache_b_qs[2] = qs0.z;
+        cache_b_qs[3] = qs0.w;
+        cache_b_qs[4] = qs1.x;
+        cache_b_qs[5] = qs1.y;
+        cache_b_qs[6] = qs1.z;
+        cache_b_qs[7] = qs1.w;
 #else
 #error unimplemented
 #endif
