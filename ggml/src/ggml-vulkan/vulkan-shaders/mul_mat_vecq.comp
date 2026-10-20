@@ -24,6 +24,20 @@ layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
 uint a_offset, b_offset, d_offset;
 
+#ifdef USE_SUBGROUP_ADD_NO_SHMEM
+// Each subgroup of the workgroup computes its own rows, so a workgroup can hold
+// several subgroups without a shared-memory reduction or a barrier.
+#define ROW_THREADS gl_SubgroupSize
+#define ROW_TID gl_SubgroupInvocationID
+#define ROW_GROUPS gl_NumSubgroups
+#define ROW_GROUP gl_SubgroupID
+#else
+#define ROW_THREADS BLOCK_SIZE
+#define ROW_TID gl_LocalInvocationID.x
+#define ROW_GROUPS 1
+#define ROW_GROUP 0
+#endif
+
 int32_t cache_b_qs[K_PER_ITER / 4];
 vec2 cache_b_ds;
 
@@ -75,7 +89,7 @@ void iter(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const uint first_row, const
 }
 
 void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
-    const uint tid = gl_LocalInvocationID.x;
+    const uint tid = ROW_TID;
 
     get_offsets(a_offset, b_offset, d_offset);
     a_offset *= QUANT_K / QUANT_K_Q8_1;
@@ -89,7 +103,7 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
         }
     }
 
-    const uint col_stride = K_PER_ITER * BLOCK_SIZE;
+    const uint col_stride = K_PER_ITER * ROW_THREADS;
     uint num_iters = p.ncols / col_stride;
     if (num_iters * col_stride + K_PER_ITER * tid < p.ncols) {
         num_iters++;
@@ -124,7 +138,7 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
 }
 
 void main() {
-    const uint first_row = NUM_ROWS * (gl_WorkGroupID.x + gl_NumWorkGroups.x * gl_WorkGroupID.z);
+    const uint first_row = NUM_ROWS * ((gl_WorkGroupID.x + gl_NumWorkGroups.x * gl_WorkGroupID.z) * ROW_GROUPS + ROW_GROUP);
 
 #ifdef NEEDS_INIT_IQ_SHMEM
     init_iq_shmem(gl_WorkGroupSize);
