@@ -45,7 +45,13 @@ generation and launch shape, not exotic instructions.
    yet NVK is slower (110 vs 84 ms). First try forcing `FA_SCALAR` for pp on
    NVK Volta. Then check coopmat FA occupancy and smem use. Apply the
    subgroup-reduction approach to rope and rms_norm.
-7. **Upstreaming:** once freedesktop permission arrives, push
+7. **Check memory attributes of NVK buffers on Tegra.** Compare the
+   GPU PTE kind and cacheability (volatile/L2-bypass bit) of the weight
+   buffers under nouveau against CUDA's allocations. NVK reports uma: 1;
+   if sysmem mappings skip L2, every reuse goes to DRAM. CPY at 42–46 GB/s
+   suggests this is OK for streaming, but it's unverified for re-read data
+   (the q8_1 vector, KV cache).
+8. **Upstreaming:** once freedesktop permission arrives, push
    `nak-idp4a-imm`, then the control-flow stall fix, then the rest (see
    UPSTREAM.md).
 

@@ -75,3 +75,19 @@ where it was committed, and what failed.
   CUDA skips its MMA FA on Xavier because `volta_mma_available` checks
   arch == 700 and sm_72 reports 720 (see UPSTREAM.md).
 - tg: neither stack uses tensor cores (IDP.4A mat-vec, scalar/tile FA).
+
+## 2026-10-20 (later): does CUDA use cache/prefetch tricks?
+
+- CUDA Q4_0 mat-vec SASS (`mul_mat_vec_q<type 2>`, sm_72): no prefetch or
+  cache-control instructions (no CCTL, no eviction hints). Only plain
+  `LDG.E.CONSTANT.SYS` (32-bit) and `LDG.E.U16.CONSTANT.SYS` (scales), the
+  same load form NAK emits. Weights are read in place in GGUF block layout.
+- What it does do: the loop is unrolled 2x and issues all ~20 loads for
+  both blocks before the first IDP.4A, addressing them off a few base
+  registers with immediate offsets (`[R4-0x486]`, `[R8+0x14]`). That is
+  memory-level parallelism, not cache placement.
+- The "next tile waiting" pattern exists only in the pp GEMMs, in registers
+  and double-buffered shared memory (CUTLASS design). NVK's
+  mul_mm_volta_f16 does the same.
+- Unchecked difference: the GPU page cacheability/L2 attributes of NVK
+  buffers in Tegra system memory vs CUDA allocations (see NEXT.md).
