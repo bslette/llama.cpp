@@ -36,6 +36,7 @@ test-backend-ops: full MUL_MAT 2929/0, MUL_MAT_ID 945/0, MUL_MAT_VEC_FUSION 1265
 | `6e44b0e` | RA: place phis for their vector use in later blocks | loop movs 124 → 16 per K tile; pp 763.5 → 777.7 |
 | `e71e443` | model Volta HMMA/IMMA results as 24 cycles | neutral, correct model |
 | `972938f` | L2 maintenance around every exec when nouveau caches sysmem (uvmm_sysmem_vol=0); lets Tegra use its GPU L2 | pp +12–13%, tg +11% (Q4_0 879/57.9, Q8_0 868/42.0) |
+| `df97444` | `NAK_DEBUG=nowrap`: fold constant buffer offsets into LDG/STG immediates, assuming 32-bit offsets don't wrap (opt-in) | tg Q5_K_M +19.6%, Q4_K_M +11.3%, IQ4_XS +4.8%; q6_K −12–15%, Q4_1 −3.5% |
 | `b1f2df0` | pre-RA scheduler: constant loads are not side effects; global ld latency 200 | Q6_K lm_head 2.10 → 1.58 ms, about +3% tg |
 
 Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth

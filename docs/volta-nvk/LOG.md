@@ -231,3 +231,35 @@ llama-bench pp512 / tg128 with temporary knobs (shader cache off):
   (1) NVK opt-in "offsets don't wrap" flag; (2) llama.cpp K-quant loads via
   buffer_reference 64-bit pointers; (3) NIR nuw on SSBO access-chain
   offsets. See NEXT.md.
+
+## 2026-10-20 (later): NAK_DEBUG=nowrap (option 1) to size option 2
+
+Mesa `df97444`: the address fold as an opt-in NAK debug flag (`NAK_DEBUG=nowrap`,
+part of the NVK shader-cache key). pp512 / tg128, shader cache off:
+
+| model | off | nowrap | tg change |
+|---|---|---|---|
+| Q4_0 | 903 / 58.14 | 910 / 58.44 | +0.5% |
+| Q8_0 | 864 / 42.22 | 867 / 42.54 | +0.8% |
+| Q4_1 | 874 / 57.29 | 879 / 55.28 | **−3.5%** |
+| Q4_K_M | 759 / 45.08 | 757 / 50.17 | **+11.3%** |
+| Q5_K_M | 690 / 38.87 | 681 / 46.47 | **+19.6%** |
+| IQ4_XS | 833 / 52.10 | 835 / 54.59 | +4.8% |
+
+Per op (tg, µs per call, off → nowrap):
+
+- q4_K mat-vec: 5632×2048 207 → 164, GLU 359 → 291, 2048×2048 84 → 69, MUL_MAT_ADD k=5632 202 → 164 (−19 to −21%)
+- q5_K mat-vec: GLU 476 → 345, 2048×2048 102 → 79, k=5632 253 → 185 (−23 to −28%)
+- iq4_xs mat-vec: −4 to −12%
+- q4_0: −2%
+- **q6_K mat-vec gets slower**: lm_head 1454 → 1682 µs (+15%), k=5632 344 → 386 (+12%)
+
+Correctness with nowrap: MUL_MAT n≤8 1536/1536, MUL_MAT_ID n≤8 434/434,
+FLASH_ATTN_EXT 5332/5332, GET_ROWS, RMS_NORM_MUL_ADD, SOFT_MAX, ROPE all
+pass; PPL Q4_0 26.4037 and Q4_K_M 25.9262, identical to off.
+
+Conclusion: the gain is concentrated in q4_K/q5_K (and iq4_xs) mat-vec, and
+a blanket fold hurts q6_K and q4_1. A per-shader fix (option 2: 64-bit
+buffer_reference addressing in those MMVQ paths only) is worth doing; it
+would also avoid the q6_K regression, which costs Q4_K_M/Q5_K_M about
+0.65 ms/token (lm_head + q6_K down projections).

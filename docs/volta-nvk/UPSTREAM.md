@@ -19,7 +19,7 @@ Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
 | Volta cooperative matrices (HMMA.884 f16/f32, IMMA.8816, f16 accumulators, STEP pairing, latencies) | `2c498ed`..`e71e443` | **needs work**: large series, rebase onto main, CTS cooperative_matrix |
 | nouveau: GV11B (0x15b) as Volta; tegra scanout/clear fixes | `18d4a25`, `5967863`, `a622087` | **needs work**: check against the current tegra/nouveau code on main |
 | **nouveau maps VM_BIND system memory volatile (L2-uncached)** (`nouveau_uvmm_vmm_map`: vol = 1 for non-VRAM). On Tegra iGPUs (no VRAM) the GPU L2 then caches nothing; L1-bypassing loads read at DRAM speed. Needs a kernel change (vol = 0 for system memory on iGPUs, or a VM_BIND flag) plus L2 maintenance by the submitter or kernel | kernel: `e7a8ffd` on bslette/android_kernel_nvidia_kernel `rey-nouveau-gv11b-6.18-l2` (module param); Mesa: `972938f` | **needs work**: for upstream, replace the param with a per-device default (iGPU) or a VM_BIND flag, and decide whether the kernel or NVK does L2 maintenance |
-| NAK does no immediate-offset folding for global loads: each load gets a full 64-bit address add where ptxas uses `[R+imm]`. Likely part of the remaining MMVQ gap | unsafe experiment only (`experiments/`) | **low priority**: −8% instructions gave no speedup (2026-10-20) |
+| NAK does no immediate-offset folding for SSBO loads: a constant inside the 32-bit offset add can't be folded without a no-wrap guarantee, so each load gets a full 64-bit address add where ptxas uses `[R+imm]` | opt-in `df97444` (`NAK_DEBUG=nowrap`) | **report/discuss**: worth +11–20% tg on K-quants on Volta; needs NIR nuw on SSBO offsets or apps using 64-bit addressing |
 
 ## llama.cpp (github.com/ggml-org/llama.cpp)
 
