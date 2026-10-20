@@ -1358,6 +1358,13 @@ vk_fa_tuning_params get_fa_tuning_params(const vk_device& device, uint32_t hsk, 
         }
     }
 
+    // NVK on Volta: the scalar path is also faster for a few rows (token generation with GQA:
+    // tg128 +2-3%), while coopmat wins for prompt batches.
+    if (path == FA_COOPMAT1 && n_rows <= 8 && device->driver_id == vk::DriverId::eMesaNvk &&
+        strstr(device->properties.deviceName, " GV1") != nullptr) {
+        path = FA_SCALAR;
+    }
+
     // scalar is faster than coopmat when N==1
     if (n_rows == 1 && (path == FA_COOPMAT1 || path == FA_COOPMAT2)) {
         path = FA_SCALAR;
