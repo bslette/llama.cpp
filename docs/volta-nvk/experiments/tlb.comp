@@ -1,0 +1,21 @@
+#version 450
+#extension GL_EXT_control_flow_attributes : require
+// TLB probe (gemmbench interface): like the GEMM tile loads, 4 threads read 64 B of one "row";
+// a warp reads 8 rows.  2048 rows, row stride = 64 B (skip=0, 32 pages) or 4 KiB (skip=1, 2048
+// pages) or 64 KiB (skip=2).  The same 128 KiB of data either way, so it fits L2.
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer BA { uvec4 a[]; };
+layout(std430, binding = 1) readonly buffer BB { uvec4 b[]; };
+layout(std430, binding = 2) writeonly buffer BC { float c[]; };
+layout(push_constant) uniform P { uint M, N, K, skip; } p;
+void main() {
+	const uint wg = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+	const uint gid = wg * 256 + gl_LocalInvocationID.x;
+	const uint stride = p.skip;   // row stride in uvec4 (16 B)
+	uvec4 s = uvec4(0);
+	[[unroll]] for (uint i = 0; i < 64; i++) {
+		const uint r = (gid / 4 + i * 523u) & 2047u;
+		s ^= a[r * stride + (gid & 3u)];
+	}
+	if ((s.x ^ s.y ^ s.z ^ s.w) == 0x12345678u) c[gid] = 1.0;
+}

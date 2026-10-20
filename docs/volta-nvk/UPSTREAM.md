@@ -18,7 +18,8 @@ Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
 | nak: cmat_muladd destination size overflow | `1e32f0c` | **ready** (small) |
 | Volta cooperative matrices (HMMA.884 f16/f32, IMMA.8816, f16 accumulators, STEP pairing, latencies) | `2c498ed`..`e71e443` | **needs work**: large series, rebase onto main, CTS cooperative_matrix |
 | nouveau: GV11B (0x15b) as Volta; tegra scanout/clear fixes | `18d4a25`, `5967863`, `a622087` | **needs work**: check against the current tegra/nouveau code on main |
-| NAK does no immediate-offset folding for global loads: each load gets a full 64-bit address add where ptxas uses `[R+imm]`. Likely part of the remaining MMVQ gap | none yet | **report / implement** (see NEXT.md) |
+| **nouveau maps VM_BIND system memory volatile (L2-uncached)** (`nouveau_uvmm_vmm_map`: vol = 1 for non-VRAM). On Tegra iGPUs (no VRAM) the GPU L2 then caches nothing; L1-bypassing loads read at DRAM speed. Needs a kernel change (vol = 0 for system memory on iGPUs, or a VM_BIND flag) plus L2 maintenance by the submitter or kernel | kernel: board-only `uvmm_sysmem_vol` param (source lost); Mesa: `972938f` | **needs work**: kernel patch must be recreated; decide kernel vs NVK flushing |
+| NAK does no immediate-offset folding for global loads: each load gets a full 64-bit address add where ptxas uses `[R+imm]`. Likely part of the remaining MMVQ gap | unsafe experiment only (`experiments/`) | **low priority**: −8% instructions gave no speedup (2026-10-20) |
 
 ## llama.cpp (github.com/ggml-org/llama.cpp)
 

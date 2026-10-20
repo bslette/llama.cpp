@@ -1,0 +1,18 @@
+#version 450
+#extension GL_EXT_control_flow_attributes : require
+// L2 bandwidth probe (gemmbench interface): coherent (L1-bypassing) coalesced 16 B loads,
+// 64 per thread, cycling through a window of p.skip KiB of buffer A.
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) coherent buffer BA { uvec4 a[]; };
+layout(std430, binding = 1) readonly buffer BB { uvec4 b[]; };
+layout(std430, binding = 2) writeonly buffer BC { float c[]; };
+layout(push_constant) uniform P { uint M, N, K, skip; } p;
+void main() {
+	const uint wg = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+	const uint gid = wg * 256 + gl_LocalInvocationID.x;
+	const uint w = p.skip * 64u;   // uvec4 in the window
+	uvec4 s = uvec4(0);
+	[[unroll]] for (uint i = 0; i < 64; i++)
+		s ^= a[(gid + i * 65536u) % w];
+	if ((s.x ^ s.y ^ s.z ^ s.w) == 0x12345678u) { c[gid] = 1.0; a[gid] = s; }
+}

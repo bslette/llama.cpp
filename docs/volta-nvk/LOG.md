@@ -114,3 +114,53 @@ where it was committed, and what failed.
   locality (NVK: about 768 concurrent 2-row streams in 144 B pieces; CUDA:
   one row per 128-thread CTA, the whole row in one pass).
 - Pivoting to the pp GEMM (largest absolute gap).
+
+## 2026-10-20 (later): pp GEMM investigation → GPU L2 does not cache NVK buffers
+
+- cuBLAS `cutlass_70_tensorop_h884gemm_128x128_tn_align8` (ncu, 2048x512x2048):
+  855 µs = 5.0 TFLOPS, 128 threads (4 warps x 64x64), 168 regs, 32 KB smem,
+  18.75% occupancy, L2 hit 50.6%, L2 throughput 71.5%, issue slots 29%.
+- NVK `mul_mm_volta_f16`: 128 GPRs x 256 threads (2 CTAs/SM). The loop is
+  lean (per warp per K tile: 64 HMMA, 24 LDS.128, 16 STS.32, 4 LDG.128, 1
+  bar). HMMA steps are 2 + NOP 2 = 4 cycles apart, which is peak rate.
+- gemmbench sweep of the lost session's variants (current Mesa): all 2.3–2.55
+  TFLOPS: 64x64 warp tiles (w64, 192 GPRs), pitch 8/16/24, f16 vs f32 acc,
+  single buffer. New: barrier without memory semantics (no membar) 2.56,
+  uvec4 smem stores 2.54. No change.
+- Ablation (gemm_h2/gemm_ab, 5632x512x2048): full 4.7–5.3 ms; no MMA 4.4;
+  no MMA + no fragment loads 4.1; global loads only 4.07; smem stores +
+  barrier only 0.94; empty loop 0.75. **The global loads alone take the
+  whole kernel time**: 184 MB of tile traffic at about 45 GB/s.
+- Tiled A/B layout (each 128x32 tile contiguous): +9–12% (2.54 → 2.77).
+- TLB probe (2048 rows x 64 B, stride 128 B..256 KiB): flat, so no TLB effect.
+- L2 probe with L1-bypassing (`ld.strong.gpu`) coalesced loads: **58.5 GB/s
+  for every window from 64 KiB to 64 MiB**, which is DRAM speed. With
+  `.constant` (L1-cached) loads, small windows read at 425 GB/s. So the GPU
+  L2 does not cache NVK buffers; every L1 miss goes to DRAM. This explains
+  the GEMM (no L2 reuse of A/B tiles) and probably hurts FA and others.
+- Suspect: nouveau maps host (Tegra system) memory with the PTE VOL bit
+  (`vol = target == NVKM_MEM_TARGET_HOST` in gf100_vmm_valid for unversioned
+  map args, as VM_BIND uses), which makes the L2 treat it as uncached.
+  Probes are in `experiments/` (l2c.comp, tlb.comp, mkab.py, mktiled.py).
+- Confirmed in nouveau (`nouveau_uvmm_vmm_map`): VM_BIND sets `vol = 1` for
+  every non-VRAM BO. The board's (lost-source) nouveau.ko has a module
+  parameter `uvmm_sysmem_vol` (default 1, rw at runtime) to change it.
+- vol=0 alone: +11–13% pp/tg but wrong results (MUL_MAT failures, PPL
+  45790), because nobody flushes/invalidates the L2 for the CPU.
+- Mesa `972938f` (local, volta-cmat-int8): nvkmd nouveau exec ctx wraps
+  every DRM_NOUVEAU_EXEC with L2_FLUSH_DIRTY + L2_SYSMEM_INVALIDATE before
+  and WFI + L2_FLUSH_DIRTY after, when uvmm_sysmem_vol reads 0
+  (NVK_L2_SYSMEM_MAINT overrides). Result with vol=0:
+  pp512 Q4_0 782 → 879, Q8_0 770 → 868, Q4_K_M 684 → 758;
+  tg128 Q4_0 52.0 → 57.9, Q8_0 37.9 → 42.0 (CUDA 40.0), Q4_K_M 43.1 → 44.9.
+  MUL_MAT n=1..8 1505/1505, whole tiles 40/40, PPL 26.4037 (identical).
+  L2 probe 64 KiB window: 58.5 → 138 GB/s. GEMM 2.55 → 2.94 TFLOPS.
+- To use: `echo 0 > /sys/module/nouveau/parameters/uvmm_sysmem_vol` after
+  `modprobe nouveau` (or `modprobe nouveau uvmm_sysmem_vol=0`), before
+  starting Vulkan apps (it only affects new mappings).
+- Broad correctness with vol=0 + `972938f`: FLASH_ATTN_EXT 5332/5332,
+  MUL_MAT (full) 2339/2339, MUL_MAT_ID 939/939, MUL_MAT_VEC_FUSION 1265/1265,
+  RMS_NORM 53, ROPE 470, SOFT_MAX 214, GET_ROWS 240, SET_ROWS 319, CPY 254,
+  ADD 105, MUL 94: all pass. (The GLU filter matched 0 tests, so that op
+  wasn't run.) Pushed `972938f`. Board `/root/nvkenv.sh`
+  now sets uvmm_sysmem_vol=0 when sourced.

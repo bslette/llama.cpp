@@ -22,6 +22,16 @@ generation and launch shape, not exotic instructions.
 
 ## Plan
 
+0. **Done 2026-10-20: GPU L2 caching for NVK on Tegra** (uvmm_sysmem_vol=0 +
+   Mesa `972938f`): +12% pp, +11% tg. Follow-ups:
+   - Recreate the nouveau 6.18 gv11b kernel source (lost with the bazzite
+     build dir); make vol=0 the default for Tegra system memory upstream-style.
+   - Re-profile every op with L2 caching on; the per-op gap table below is
+     from before.
+   - GEMM is still 2.94 vs 5.0 TFLOPS: with L2 on, re-run the ablation
+     (global loads vs fragment loads) and try the tiled A/B layout again
+     (+9–12% before).
+
 1. ~~**NAK: fold constant offsets into global load addresses.**~~ Tested
    2026-10-20 with an unsafe experiment pass: −8% instructions, no tg gain
    (see LOG). For mat-vec, look at memory-level parallelism and DRAM
@@ -41,12 +51,7 @@ generation and launch shape, not exotic instructions.
    yet NVK is slower (110 vs 84 ms). First try forcing `FA_SCALAR` for pp on
    NVK Volta. Then check coopmat FA occupancy and smem use. Apply the
    subgroup-reduction approach to rope and rms_norm.
-7. **Check memory attributes of NVK buffers on Tegra.** Compare the
-   GPU PTE kind and cacheability (volatile/L2-bypass bit) of the weight
-   buffers under nouveau against CUDA's allocations. NVK reports uma: 1;
-   if sysmem mappings skip L2, every reuse goes to DRAM. CPY at 42–46 GB/s
-   suggests this is OK for streaming, but it's unverified for re-read data
-   (the q8_1 vector, KV cache).
+7. ~~**Check memory attributes of NVK buffers on Tegra.**~~ Done: L2 was uncached (item 0).
 8. **Upstreaming:** once freedesktop permission arrives, push
    `nak-idp4a-imm`, then the control-flow stall fix, then the rest (see
    UPSTREAM.md).
