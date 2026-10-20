@@ -22,15 +22,11 @@ generation and launch shape, not exotic instructions.
 
 ## Plan
 
-1. **NAK: fold constant offsets into global load addresses.** Compare the
-   NAK dump of mul_mat_vecq (Q4_0) against CUDA SASS
-   (`out/perf/cuda-l4t-20261019`). Teach NAK to use `[R.64 + imm24]` for
-   loads whose address is base + constant. Should cut ALU work and
-   registers in every mat-vec. Measure lm_head and gate/up µs.
-2. **MMVQ instruction count per byte.** Count instructions per 32-weight
-   block in NAK output vs SASS: scale loads, nibble unpack, IDP.4A and
-   address math. Look for 64-bit math, redundant conversions, and missed
-   `PRMT`/`LOP3` folding.
+1. ~~**NAK: fold constant offsets into global load addresses.**~~ Tested
+   2026-10-20 with an unsafe experiment pass: −8% instructions, no tg gain
+   (see LOG). For mat-vec, look at memory-level parallelism and DRAM
+   locality instead of instruction count.
+2. ~~**MMVQ instruction count per byte.**~~ Superseded by item 1's result.
 3. **Q6_K lm_head (1.58 vs 1.15 ms).** Check rows per workgroup and the q6_K
    mat-vec unpack under the 4-subgroup layout. Try 1 row per subgroup.
 4. **Small ops in tg:** fuse rms_norm into the following MMVQ quantize

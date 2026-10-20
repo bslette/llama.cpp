@@ -91,3 +91,26 @@ where it was committed, and what failed.
   mul_mm_volta_f16 does the same.
 - Unchecked difference: the GPU page cacheability/L2 attributes of NVK
   buffers in Tegra system memory vs CUDA allocations (see NEXT.md).
+
+## 2026-10-20 (later): NAK immediate-offset folding experiment (negative)
+
+- Confirmed: NAK computes a 32-bit offset per load, then a 64-bit add
+  (iadd3 + iadd3.x) with the buffer base, and loads at [addr+0]. The
+  constants (block member offsets like +2, +0x10) sit inside the 32-bit
+  offset, under u2u64. NIR can't move them out because GLSL integer math may
+  wrap (Mesa's TODO in nak_nir.c says the same).
+- Experiment-only pass `NAK_UNSAFE_ADDR_FOLD` (no wrap check): walks the
+  iadd tree under u2u64 and moves constants into the LDG immediate. The diff
+  is in `experiments/nak-unsafe-addr-fold-experiment.diff`; not committed.
+  - First version (top-level iadd only): 4 of 121 loads folded, no change.
+  - Tree walk: 78/121 loads folded, MMVQ shader −8% instructions,
+    iadd3.x 126 → 87.
+  - Result: tg Q4_0 52.26 → 51.79, Q8_0 37.83 → 38.07. Plain Q4_0 mat-vec
+    75.3 → 72.5 µs, fused gate/up 355.3 → 353.7 µs, Q6_K lm_head 1585 →
+    1859 µs (worse).
+- Conclusion: the mat-vec kernel is not issue/ALU bound; address math is
+  not the gap. Remaining suspects: memory-level parallelism per warp (CUDA
+  issues every load of 2 blocks first, at 39 regs / 68% occupancy) and DRAM
+  locality (NVK: about 768 concurrent 2-row streams in 144 B pieces; CUDA:
+  one row per 128-thread CTA, the whole row in one pass).
+- Pivoting to the pp GEMM (largest absolute gap).

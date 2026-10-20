@@ -10,6 +10,7 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | 3–4 rows per subgroup (instead of 2) | no gain / slower | more registers, and too few workgroups for 2048-row matrices |
 | Fused gate/up with 2 rows of each matrix per subgroup | same as 1 row | – |
 | Fused gate/up for Q8_0 and IQ4_XS | about −2% (Q8_0 37.8 → 37.1, IQ4_XS 48.0 → 47.3) | extra registers and occupancy loss outweigh the saved dispatch; left disabled |
+| Fold constant address offsets into LDG immediates (unsafe experiment, 78/121 loads) | tg Q4_0 −0.9%, Q8_0 +0.6%, Q6_K lm_head +17% slower | mat-vec is not ALU/issue bound; −8% instructions bought nothing |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 
 ## NAK scheduler
