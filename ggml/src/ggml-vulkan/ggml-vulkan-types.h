@@ -789,6 +789,7 @@ struct vk_device_struct {
 
     vk_pipeline pipeline_matmul_split_k_reduce;
     vk_pipeline pipeline_matmul_volta_f16;  // NVK on Volta: dequantized prompt matmuls
+    vk_pipeline pipeline_matmul_volta_q4_0; // same GEMM, dequantizing q4_0 A while staging it
     vk_pipeline pipeline_quantize_q8_1_x4;
 
     vk_pipeline pipeline_dequant[GGML_TYPE_COUNT];

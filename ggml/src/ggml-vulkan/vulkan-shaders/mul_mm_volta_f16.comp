@@ -15,7 +15,17 @@
 // K step needs one barrier.  Requires M, N multiples of 128 and K, strides multiples of 32.
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+#if defined(A_Q4_0)
+// A read in place as ggml blocks (one 32-weight block per row per K tile) and dequantized to f16
+// while it is staged into shared memory: two invocations per row, each half a block.
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#define A_QUANT 1
+layout (binding = 0) readonly buffer A {uint16_t data_a[];};
+const uint QBLK = 9;   // uint16 per block_q4_0: d, 16 bytes of nibbles
+const uint QW = 4;     // uint16 of nibbles per invocation
+#else
 layout (binding = 0) readonly buffer A {uvec4 data_a[];};   // 8 f16 per element
+#endif
 layout (binding = 1) readonly buffer B {uvec4 data_b[];};
 layout (binding = 2) writeonly buffer D {float data_d[];};
 
@@ -41,11 +51,28 @@ void main() {
     const uint ka = p.stride_a / 8, kb = p.stride_b / 8;
     const uint lr = tid / 4, lc = tid % 4;   // rows lr and lr + 64, 8 f16 at column 8 * lc
 
+#ifdef A_QUANT
+    const uint ar = tid / 2, ah = tid % 2;   // A row ar, half ah of its block
+    const uint nblk = p.stride_a / 32;
+    uint qd, qa[QW];
+    {
+        const uint base = (m0 + ar) * nblk * QBLK;
+        qd = uint(data_a[base]);
+        [[unroll]] for (uint j = 0; j < QW; j++) {
+            qa[j] = uint(data_a[base + 1 + QW * ah + j]);
+        }
+    }
+    uvec4 rb[2];
+    [[unroll]] for (uint i = 0; i < 2; i++) {
+        rb[i] = data_b[(n0 + lr + 64 * i) * kb + lc];
+    }
+#else
     uvec4 ra[2], rb[2];
     [[unroll]] for (uint i = 0; i < 2; i++) {
         ra[i] = data_a[(m0 + lr + 64 * i) * ka + lc];
         rb[i] = data_b[(n0 + lr + 64 * i) * kb + lc];
     }
+#endif
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc[4][2];
     [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < 2; j++) {
         acc[i][j] = coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0hf);
@@ -54,6 +81,30 @@ void main() {
     const uint ktiles = p.K / BK;
     uint buf = 0;
     for (uint kt = 0; kt < ktiles; kt++) {
+#ifdef A_QUANT
+        {
+            // (0x6400 | n) is the f16 1024 + n, so the weights come out of one HADD2 and one
+            // HMUL2 per pair, exactly as (n - 8) * d rounded to f16.
+            const f16vec2 dd = f16vec2(unpackFloat2x16(qd).x);
+            const uint o = ar * PITCH;
+            [[unroll]] for (uint j = 0; j < QW; j++) {
+                const uint v = qa[j];
+                const uint lo = (v & 0xFu) | ((v & 0xF00u) << 8);
+                const uint hi = ((v >> 4) & 0xFu) | ((v & 0xF000u) << 4);
+                const f16vec2 wl = (unpackFloat2x16(lo | 0x64006400u) - f16vec2(1032.0hf)) * dd;
+                const f16vec2 wh = (unpackFloat2x16(hi | 0x64006400u) - f16vec2(1032.0hf)) * dd;
+                sa[buf][o + 8 * ah + 2 * j] = wl.x; sa[buf][o + 8 * ah + 2 * j + 1] = wl.y;
+                sa[buf][o + 16 + 8 * ah + 2 * j] = wh.x; sa[buf][o + 16 + 8 * ah + 2 * j + 1] = wh.y;
+            }
+        }
+        [[unroll]] for (uint i = 0; i < 2; i++) {
+            const uint o = (lr + 64 * i) * PITCH + lc * 8;
+            [[unroll]] for (uint w = 0; w < 4; w++) {
+                const f16vec2 y = unpackFloat2x16(rb[i][w]);
+                sb[buf][o + 2 * w] = y.x; sb[buf][o + 2 * w + 1] = y.y;
+            }
+        }
+#else
         [[unroll]] for (uint i = 0; i < 2; i++) {
             const uint o = (lr + 64 * i) * PITCH + lc * 8;
             [[unroll]] for (uint w = 0; w < 4; w++) {
@@ -63,13 +114,25 @@ void main() {
                 sb[buf][o + 2 * w] = y.x; sb[buf][o + 2 * w + 1] = y.y;
             }
         }
+#endif
         barrier();
         if (kt + 1 < ktiles) {
             const uint kk = (kt + 1) * (BK / 8);
+#ifdef A_QUANT
+            const uint base = ((m0 + ar) * nblk + kt + 1) * QBLK;
+            qd = uint(data_a[base]);
+            [[unroll]] for (uint j = 0; j < QW; j++) {
+                qa[j] = uint(data_a[base + 1 + QW * ah + j]);
+            }
+            [[unroll]] for (uint i = 0; i < 2; i++) {
+                rb[i] = data_b[(n0 + lr + 64 * i) * kb + kk + lc];
+            }
+#else
             [[unroll]] for (uint i = 0; i < 2; i++) {
                 ra[i] = data_a[(m0 + lr + 64 * i) * ka + kk + lc];
                 rb[i] = data_b[(n0 + lr + 64 * i) * kb + kk + lc];
             }
+#endif
         }
         [[unroll]] for (uint ks = 0; ks < BK; ks += 16) {
             coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> fa[4];

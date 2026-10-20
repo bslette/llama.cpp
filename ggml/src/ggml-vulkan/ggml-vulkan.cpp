@@ -3212,6 +3212,9 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
         device->driver_id == vk::DriverId::eMesaNvk && strstr(device->properties.deviceName, " GV1") != nullptr &&
         !getenv("GGML_VK_DISABLE_VOLTA_GEMM")) {
         ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_f16, "matmul_f16_volta", matmul_f16_volta_cm1_len, matmul_f16_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
+        if (!getenv("GGML_VK_DISABLE_VOLTA_FUSED")) {
+            ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_q4_0, "matmul_q4_0_volta", matmul_q4_0_volta_cm1_len, matmul_q4_0_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
+        }
     }
 #endif
 
@@ -6449,6 +6452,12 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
                             ne01 % 128 == 0 && ne11 % 128 == 0 && ne10 % 32 == 0 &&
                             dst->nb[1] % sizeof(float) == 0 &&
                             ggml_vk_get_to_fp16(ctx, src0->type) != nullptr;
+    // q4_0 is dequantized inside the Volta GEMM instead of in a separate pass (pp512 +3%;
+    // the same for q8_0 measured 9% slower)
+    vk_pipeline volta_pipeline = !volta_gemm ? nullptr :
+                                 src0->type == GGML_TYPE_Q4_0 && ctx->device->pipeline_matmul_volta_q4_0 ? ctx->device->pipeline_matmul_volta_q4_0 :
+                                 ctx->device->pipeline_matmul_volta_f16;
+    bool volta_fused = volta_gemm && volta_pipeline != ctx->device->pipeline_matmul_volta_f16;
     const ggml_type y_kernel_type = volta_gemm ? f16_type :
                                     ggml_vk_mul_mat_b_type(ctx, src0->type, src1, f16_type,
                                         (ggml_prec)dst->op_params[0], false, can_quantize_y, prefer_f16_b);
@@ -6460,11 +6469,11 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     const std::vector<vk_matmul_pipeline_pair>* mmp_map =
         ggml_vk_get_mul_mat_mat_pipeline_map(ctx, src0->type, y_kernel_type, (ggml_prec)dst->op_params[0]);
 
-    const bool qx_needs_dequant = mmp_map == nullptr || x_non_contig || volta_gemm;
+    bool qx_needs_dequant = (mmp_map == nullptr && !volta_fused) || x_non_contig || (volta_gemm && !volta_fused);
     const bool qy_needs_dequant = y_needs_reformat;
 
-    if (qx_needs_dequant) {
-        // dequant src0 to f16
+    if (qx_needs_dequant || volta_fused) {
+        // dequant src0 to f16 (the fused Volta GEMM only uses the map to size split_k)
         mmp_map = ggml_vk_get_mul_mat_mat_pipeline_map(ctx, f16_type, y_kernel_type, (ggml_prec)dst->op_params[0]);
     }
 
@@ -6487,6 +6496,13 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     const uint64_t d_ne = ggml_nelements(dst);
 
     const uint32_t split_k = ggml_vk_guess_split_k(ctx, ne01, ne11, ne10, disable_split_k, pipeline);
+
+    if (volta_fused && split_k > 1) {
+        // split-K runs the regular GEMM, which needs src0 dequantized
+        volta_fused = false;
+        volta_pipeline = ctx->device->pipeline_matmul_volta_f16;
+        qx_needs_dequant = true;
+    }
 
     const uint64_t qx_sz = ggml_type_size(src0->type) * x_ne / ggml_blck_size(src0->type);
     const uint64_t qy_sz = ggml_type_size(src1->type) * y_ne / ggml_blck_size(src1->type);
@@ -6547,7 +6563,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             ggml_pipeline_request_descriptor_sets(ctx, to_q8_1, 1);
         }
         if (volta_gemm && split_k == 1) {
-            ggml_pipeline_request_descriptor_sets(ctx, ctx->device->pipeline_matmul_volta_f16, 1);
+            ggml_pipeline_request_descriptor_sets(ctx, volta_pipeline, 1);
         }
         if (split_k > 1) {
             ggml_pipeline_request_descriptor_sets(ctx, ctx->device->pipeline_matmul_split_k_reduce, 1);
@@ -6656,7 +6672,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     // compute
     if (volta_gemm && split_k == 1) {
         const std::array<uint32_t, 6> pc = { (uint32_t)ne01, (uint32_t)ne11, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)ne10, stride_d };
-        ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_matmul_volta_f16,
+        ggml_vk_dispatch_pipeline(ctx, subctx, volta_pipeline,
                                   { vk_subbuffer{ d_X, x_buf_offset, x_range }, vk_subbuffer{ d_Y, y_buf_offset, y_range },
                                     ggml_vk_subbuffer(ctx, d_D, d_buf_offset) },
                                   pc, { (uint32_t)ne11, (uint32_t)ne01, 1 });

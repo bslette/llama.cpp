@@ -1222,6 +1222,7 @@ void process_shaders() {
 #if defined(GGML_VULKAN_COOPMAT_GLSLC_SUPPORT)
     // Volta (NVK): f16 x f16 GEMM with f16 accumulators for dequantized prompt matmuls
     string_to_spv("matmul_f16_volta", "mul_mm_volta_f16.comp", {}, true, true, false);
+    string_to_spv("matmul_q4_0_volta", "mul_mm_volta_f16.comp", {{"A_Q4_0", "1"}}, true, true, false);
 #endif
 
     string_to_spv("conv2d_dw_whcn_f32", "conv2d_dw.comp", merge_maps(base_dict, {{"A_TYPE", "float"}, {"B_TYPE", "float"}, {"D_TYPE", "float"}, {"WHCN", "1"}}));
