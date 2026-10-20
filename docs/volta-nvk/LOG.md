@@ -164,3 +164,22 @@ where it was committed, and what failed.
   ADD 105, MUL 94: all pass. (The GLU filter matched 0 tests, so that op
   wasn't run.) Pushed `972938f`. Board `/root/nvkenv.sh`
   now sets uvmm_sysmem_vol=0 when sourced.
+
+## 2026-10-20 (later): nouveau uvmm_sysmem_vol recreated and pushed
+
+- Not upstream: mainline `nouveau_uvmm_vmm_map()` still hardcodes vol = 1
+  for non-VRAM; no parameter or Tegra exception exists.
+- The board's 6.18 nouveau source was found as stealth's (work-tree-less)
+  repo `kernel/platform/kernel-6.18/vendor/nvidia/kernel.git`, branch
+  `local-rey-nouveau-gv11b-6.18-v68` = GitHub `rey-nouveau-gv11b-6.18`
+  (977d70d). It did not contain uvmm_sysmem_vol (that was an uncommitted
+  bazzite edit).
+- Recreated as `e7a8ffd` "drm/nouveau/uvmm: add uvmm_sysmem_vol ..." on top
+  of 977d70d; pushed to bslette/android_kernel_nvidia_kernel branch
+  `rey-nouveau-gv11b-6.18-l2`. Same name, description, default and perms.
+- Built on stealth (`~/nouveau-l2/build-nouveau.sh`: board /proc/config.gz,
+  clang r536225 from the 23.2 tree, prebuilt flex/bison/m4); vermagic
+  `6.18.21-nx+` matches. Loaded on the board in place of the old module:
+  vol=0 MUL_MAT n=1..8 1505/1505, FLASH_ATTN_EXT 5332/5332, pp512/tg128
+  Q4_0 871.7/57.7, PPL 26.4037. The installed /lib/modules nouveau.ko is
+  unchanged (the rebuilt one is /var/tmp/nouveau-l2.ko).

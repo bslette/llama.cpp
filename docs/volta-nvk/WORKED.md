@@ -39,6 +39,12 @@ test-backend-ops: full MUL_MAT 2929/0, MUL_MAT_ID 945/0, MUL_MAT_VEC_FUSION 1265
 Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 `~/nvk-check/mesa-main` branch `nak-idp4a-imm` (on mesa main 335d569).
 
+## Kernel: `bslette/android_kernel_nvidia_kernel` branch `rey-nouveau-gv11b-6.18-l2`
+
+| Commit | Change | Measured |
+|---|---|---|
+| `e7a8ffd` | nouveau `uvmm_sysmem_vol` module param (0 = VM_BIND sysmem L2-cacheable), on top of the board's `rey-nouveau-gv11b-6.18` (977d70d) | with Mesa `972938f`: pp +12%, tg +11% |
+
 ## Tooling (bazzite `lineage/tools/`, not in git)
 
 - `tools/jobs/jobs.sh`: `launch` / `wait` / `waitp`. Launch is detached and
