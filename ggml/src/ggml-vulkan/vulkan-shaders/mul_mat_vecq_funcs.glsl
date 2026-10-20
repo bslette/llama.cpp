@@ -5,20 +5,23 @@
 #include "types.glsl"
 
 #ifdef A_BDA
-// A_BDA: A is read through 64-bit pointers, for blocks that are only 2-byte
-// aligned. The groups of 16 bytes read below start at multiples of 16 bytes
-// within the block, so each is read as three aligned 8-byte loads and
-// realigned, instead of 2-byte loads. With 64-bit addresses the constant
+// A_BDA: A is read through 64-bit pointers, for blocks that are only 2- or
+// 4-byte aligned. For q3_K and q6_K the groups of 16 bytes read below start at
+// multiples of 16 bytes within the block, so each is read as three aligned
+// 8-byte loads and realigned, instead of 2-byte loads. With 64-bit addresses the constant
 // offsets (field offsets, the second and third word) fold into the loads; with
 // 32-bit buffer offsets the compiler can't fold them, because the 32-bit add
 // might wrap.
-#if defined(DATA_A_Q3_K)
+#if defined(DATA_A_Q2_K)
+#define A_BLOCK_SIZE (QUANT_K_Q2_K/16 + QUANT_K_Q2_K/4 + 4)
+#elif defined(DATA_A_Q3_K)
 #define A_BLOCK_SIZE (QUANT_K_Q3_K/8 + QUANT_K_Q3_K/4 + 12 + 2)
 #elif defined(DATA_A_Q6_K)
 #define A_BLOCK_SIZE (QUANT_K_Q6_K/2 + QUANT_K_Q6_K/4 + QUANT_K_Q6_K/16 + 2)
 #endif
 
 layout (buffer_reference, std430, buffer_reference_align = 8) readonly buffer AWords {uvec2 w[3];};
+layout (buffer_reference, std430, buffer_reference_align = 4) readonly buffer AWords4 {uint w[4];};
 layout (buffer_reference, std430, buffer_reference_align = 2) readonly buffer ABlock {A_TYPE b;};
 
 uint64_t a_block_addr(const uint ib_k) {
@@ -64,7 +67,12 @@ FLOAT_TYPE get_dm(uint ib) {
 #if defined(DATA_A_Q2_K)
 FLOAT_TYPEV2 get_dm(uint ib) {
     const uint ib_k = ib / 8;
+#ifdef A_BDA
+    ABlock block = ABlock(a_block_addr(ib_k));
+    return FLOAT_TYPEV2(block.b.dm);
+#else
     return FLOAT_TYPEV2(data_a_packed32[ib_k].dm);
+#endif
 }
 #endif
 
@@ -236,17 +244,30 @@ i32vec4 repack4(uint ib, uint iqs) {
     const uint qs_idx = (iqs_k / 32) * 8 + (iqs_k % 8);
     const uint qs_shift = ((iqs_k % 32) / 8) * 2;
 
+#ifdef A_BDA
+    AWords4 qs = AWords4(a_block_addr(ib_k) + qs_idx * 4 + QUANT_K_Q2_K/16);
+    return i32vec4((qs.w[0] >> qs_shift) & 0x03030303,
+                   (qs.w[1] >> qs_shift) & 0x03030303,
+                   (qs.w[2] >> qs_shift) & 0x03030303,
+                   (qs.w[3] >> qs_shift) & 0x03030303);
+#else
     return i32vec4((data_a_packed32[ib_k].qs[qs_idx    ] >> qs_shift) & 0x03030303,
                    (data_a_packed32[ib_k].qs[qs_idx + 1] >> qs_shift) & 0x03030303,
                    (data_a_packed32[ib_k].qs[qs_idx + 2] >> qs_shift) & 0x03030303,
                    (data_a_packed32[ib_k].qs[qs_idx + 3] >> qs_shift) & 0x03030303);
+#endif
 }
 
 uint8_t get_scale(uint ib, uint iqs) {
     const uint ib_k = ib / 8;
     const uint iqs_k = (ib % 8) * 8 + iqs;
 
+#ifdef A_BDA
+    ABlock block = ABlock(a_block_addr(ib_k));
+    return block.b.scales[iqs_k / 4];
+#else
     return data_a[ib_k].scales[iqs_k / 4];
+#endif
 }
 
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
@@ -615,6 +636,15 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
 #endif
 
 #if defined(DATA_A_IQ1_M)
+// IQ1_M blocks (56 bytes) are 8-byte aligned: read the four scales as one 8-byte load
+struct block_iq1_m_packed64v
+{
+    uvec2 qs[QUANT_K_IQ1_M/8/8];
+    uvec2 qh[QUANT_K_IQ1_M/16/8];
+    uvec2 scales;
+};
+layout (binding = 0) readonly buffer A_IQ1_M_PACKED64 {block_iq1_m_packed64v data_a_iq1_m_packed64[];};
+
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
     const uint ib_k = ib_a / 8;
     const uint iqs_k = (ib_a % 8) * 32 + iqs * 32;
@@ -622,15 +652,16 @@ FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
     const uint ib32 = iqs_k / 32;
     const uint ib64 = ib32 / 2;
 
-    const uint16_t[4] scales = data_a[ib_k].scales;
-    const u16vec4 s = u16vec4(scales[0], scales[1], scales[2], scales[3]) >> 12;
+    const uvec2 scales2 = data_a_iq1_m_packed64[ib_k].scales;
+    const uvec4 scales = uvec4(scales2.x & 0xFFFF, scales2.x >> 16, scales2.y & 0xFFFF, scales2.y >> 16);
+    const uvec4 s = scales >> 12;
     const float d = float(unpackHalf2x16(s.x | (s.y << 4) | (s.z << 8) | (s.w << 12)).x);
 
     const uint qs32 = data_a_packed32[ib_k].qs[ib32];
     const uint qh16 = data_a_packed16[ib_k].qh[ib32];
 
     float sum = 0;
-    const uint sc = data_a[ib_k].scales[ib64];
+    const uint sc = scales[ib64];
     [[unroll]] for (int l = 0; l < 4; ++l) {
         const uint ib16 = 2 * ib32 + l / 2;
         const float dl = d * (2 * bitfieldExtract(sc, 3 * int(ib16 & 3), 3) + 1);
