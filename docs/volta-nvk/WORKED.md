@@ -12,6 +12,8 @@ All numbers are from Jetson Xavier NX (GV11B) under NVK, TinyLlama-1.1B, unless 
 | `3e3e3d8` | rms_norm reduces with subgroupAdd instead of a 9-step smem tree | 485 → 444 µs/call; pp +0.5% |
 | `7503f0d` | coalesced 16-byte f16 dequant stores for every quant type; Volta GEMM for all types; whole-tile test cases | Q4_K_M pp 272 → 684, IQ4_XS 450 → 742 |
 | `ad1c0b8` | MMVQ: 4 subgroups per workgroup, each on its own rows (`mmvq_row_groups`=4 on NVK GV1xx, `rm_stdq_int`=2, no smem/barrier) | tg Q4_0 42.1 → 51.7, Q8_0 35.6 → 37.9, IQ4_XS 28.8 → 48.0, Q4_K_M 36.0 → 42.3, Q5_K_M 32.3 → 36.9, Q4_1 44.8 → 49.8 |
+| `7553d5c` | Volta GEMM dequantizes q4_0 while staging (not q8_0; split-K falls back) | pp512 Q4_0 878 → 902 (L2 on) |
+| `e4e8abd` | scalar FA for ≤ 8 rows on NVK Volta | tg +1–3% |
 | `854e05d` | fuse MUL_MAT(up) + MUL_MAT(gate) + SWIGLU into one MMVQ dispatch (spec const `FUSE_GLU`, push consts `a_offset_x`/`gate_delta`; needs both weights in one buffer, whole blocks apart) | Q4_K_M 42.3 → 43.2, Q5_K_M 36.9 → 37.7, Q4_0 neutral |
 
 Correctness: PPL matches CPU/CUDA (Q4_0 23.84, Q8_0 23.10 wikitext 20x512).

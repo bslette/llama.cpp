@@ -183,3 +183,51 @@ where it was committed, and what failed.
   vol=0 MUL_MAT n=1..8 1505/1505, FLASH_ATTN_EXT 5332/5332, pp512/tg128
   Q4_0 871.7/57.7, PPL 26.4037. The installed /lib/modules nouveau.ko is
   unchanged (the rebuilt one is /var/tmp/nouveau-l2.ko).
+
+## 2026-10-20 (later): old experiments re-tested with the L2 on (vol=0)
+
+gemmbench, 5632x512x2048 (TFLOPS, was → now): hc 2.54 → 2.93, w64 2.45 → 2.93,
+nb 2.56 → 2.97, nbv4 2.56 → 2.98, tiled A+B 2.77 → **3.13**, p0 1.83 → 1.94,
+f32-acc gemm 1.38 → 1.41. Everything gained about 15%; no variant pulled
+ahead. Ablation (gemm_ab): full 4.77, no MMA 3.99, no fragment loads 3.01,
+global loads only 2.12 (was 4.07), smem stores + bar 0.85, empty 0.61 ms.
+The remaining GEMM time is now split between global loads (~2.1 ms),
+fragment LDS (~1.8 ms) and MMA (~0.8 ms).
+
+llama-bench pp512 / tg128 with temporary knobs (shader cache off):
+
+| config | Q4_0 | Q8_0 | Q4_K_M | IQ4_XS |
+|---|---|---|---|---|
+| base | 874 / 57.5 | 860 / 41.8 | 758 / 44.9 | 834 / 51.7 |
+| GLU fusion for all types | 876 / 57.7 | 866 / 41.0 | 758 / 44.9 | 833 / 51.5 |
+| GLU fusion off | 877 / 58.1 | 866 / 42.0 | 756 / 42.0 | 834 / 51.8 |
+| old MMVQ layout (row groups 1) | 878 / 44.2 | 867 / 37.1 | 755 / 37.0 | 830 / 34.7 |
+| 1 row per subgroup | 879 / 56.2 | 866 / 39.0 | 758 / 44.8 | 825 / 47.0 |
+| 4 rows per subgroup | 877 / 55.6 | 866 / 39.2 | 758 / 44.8 | 830 / 50.6 |
+| NAK_UNSAFE_ADDR_FOLD | 876 / 58.0 | 868 / 42.3 | 756 / **49.8** | 831 / **54.1** |
+| FA_SCALAR forced | 768 / **59.3** | 759 / **42.7** | 675 / 45.7 | 734 / 52.9 |
+| GGML_VK_DISABLE_MMVQ | 878 / 37.3 | 865 / 35.0 | 757 / 34.9 | 830 / 26.2 |
+| GGML_VK_DISABLE_VOLTA_GEMM | 581 / 57.6 | 463 / 41.8 | 324 / 44.8 | 534 / 51.6 |
+
+- **Address folding now pays**: +11% tg Q4_K_M, +5% IQ4_XS (was +0% with
+  the L2 off). With DRAM no longer the limit, instruction count matters.
+  Needs a correct (non-wrapping) implementation.
+- **Scalar FA for tg**: +2–3% tg on all types (tg FA has 8 GQA rows, so it
+  took the coopmat path); −12% pp. Make the choice by row count.
+- Everything else confirms the current settings.
+- Lost-session attempts with the L2 on: fused-dequant Volta GEMM Q4_0 pp512
+  878 → 904 (+3%), Q8_0 868 → 791 (−9%); multi-row coopmat FA (BR 32/64)
+  880 → 814/769 (worse; correct, 5332/5332). Address fold + scalar FA
+  together, tg128: Q4_0 57.7 → 59.4, Q8_0 41.9 → 43.1, Q4_K_M 44.8 → 50.9,
+  IQ4_XS 51.7 → 55.6.
+- llama.cpp `7553d5c`: fused dequant for Q4_0 only. The first version broke
+  split-K launches (Q4_0 128x384x2048: the regular GEMM read raw q4_0);
+  fixed by dequantizing first when split_k > 1. MUL_MAT 2339/2339,
+  MUL_MAT_ID 939/939.
+- llama.cpp `e4e8abd`: scalar FA for ≤ 8 rows on NVK Volta (tg with GQA).
+  FLASH_ATTN_EXT 5332/5332, PPL 26.4037.
+- Now: pp512/tg128 Q4_0 902/58.1, Q8_0 860/42.2 (CUDA 1030/62.8, 1134/40.0).
+- Address fold: a correct version needs a design decision. Options:
+  (1) NVK opt-in "offsets don't wrap" flag; (2) llama.cpp K-quant loads via
+  buffer_reference 64-bit pointers; (3) NIR nuw on SSBO access-chain
+  offsets. See NEXT.md.

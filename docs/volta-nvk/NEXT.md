@@ -22,6 +22,14 @@ generation and launch shape, not exotic instructions.
 
 ## Plan
 
+00. **Address folding, correct version** (+11% tg Q4_K_M, +5% IQ4_XS with the
+    L2 on; unsafe experiment in `experiments/`). Pick one:
+    (1) NVK opt-in flag assuming SSBO offsets don't wrap (fast, not upstream);
+    (2) llama.cpp K-quant MMVQ loads through buffer_reference 64-bit pointers
+    so constants are 64-bit adds NAK can fold legally (upstreamable);
+    (3) NIR: no-unsigned-wrap on SSBO access-chain offset adds (needs Mesa
+    agreement on SPIR-V semantics; glslang never emits InBounds).
+
 0. **Done 2026-10-20: GPU L2 caching for NVK on Tegra** (uvmm_sysmem_vol=0 +
    Mesa `972938f`): +12% pp, +11% tg. Follow-ups:
    - Recreate the nouveau 6.18 gv11b kernel source (lost with the bazzite

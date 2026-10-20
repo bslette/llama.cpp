@@ -13,6 +13,17 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | Fold constant address offsets into LDG immediates (unsafe experiment, 78/121 loads) | tg Q4_0 −0.9%, Q8_0 +0.6%, Q6_K lm_head +17% slower | mat-vec is not ALU/issue bound; −8% instructions bought nothing |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 
+## Re-tested with the GPU L2 on (2026-10-20)
+
+| Attempt | Result |
+|---|---|
+| Multi-row coopmat FA (GGML_VK_FA_BR 32/64) | pp512 880 → 814 / 769 |
+| Fused dequant for Q8_0 | pp512 868 → 791 |
+| Forcing scalar FA for all row counts | pp −12% (kept only for ≤ 8 rows) |
+| GLU fusion for Q8_0/IQ4_XS | still slower (Q8_0 41.8 → 41.0) |
+| Old MMVQ layout, 1 or 4 rows/subgroup, DISABLE_MMVQ, DISABLE_VOLTA_GEMM | all slower |
+| GEMM variants (w64, pitch, nb, v4) | same ~15% gain as baseline; tiled layout best (3.13 TFLOPS) |
+
 ## NAK scheduler
 
 | Attempt | Result | Why |
