@@ -13,6 +13,8 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | Fold constant address offsets into LDG immediates (unsafe experiment, 78/121 loads) | tg Q4_0 −0.9%, Q8_0 +0.6%, Q6_K lm_head +17% slower | mat-vec is not ALU/issue bound; −8% instructions bought nothing | 
 | ivec2 q8_1 loads for K_PER_ITER 8 (Q8_0 MMVQ) | tg 42.2 → 40.9 | dropped from `39da5ea` |
 | `NAK_DEBUG=nowrap` on top of vector loads | Q4_K_M 52.7 → 51.3, Q5_K_M 48.7 → 48.0 | the fold no longer pays once loads are vectors |
+| q6_K MMVQ with aligned 8-byte window loads through SSBOs (no pointers) | lm_head 1455 → 1665 µs | load count wasn't the cost; the per-load 64-bit address add was |
+| q2_K with 8-byte window loads through pointers | 780 → 790 µs | blocks are 4-byte aligned already; realign ALU ate the gain (plain 4-byte loads through pointers: 689) |
 | Blanket address fold with the L2 on (`NAK_DEBUG=nowrap`) for every shader | q6_K mat-vec +12–15% slower, Q4_1 tg −3.5% | the gain is per shader; apply it only to q4_K/q5_K/iq4_xs |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 

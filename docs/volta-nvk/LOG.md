@@ -291,3 +291,41 @@ cost 3% and was dropped. Per op: q4_K 5632×2048 207 → 158 µs, q5_K GLU
 use MMVQ here). Tests: MUL_MAT n≤8 1536/1536, MUL_MAT_ID 434/434,
 MUL_MAT_VEC_FUSION 1265/1265; PPL Q4_K_M 25.9262 (same), IQ4_XS 26.4761,
 Q8_0 25.2937.
+
+## 2026-10-20 (later): the other MMVQ types
+
+q6_K (210-byte blocks, 2-byte aligned) can't use vector loads. Measured
+first (Q4_K_M per call, lm_head 32000×2048 / down 2048×5632):
+
+| q6_K path | lm_head | down | Q4_K_M tg |
+|---|---|---|---|
+| dequant mat-vec (before) | 1455 | 344 | 52.7 |
+| MMVQ, 2-byte loads | 1554 | 303 | 53.8 |
+| MMVQ + nowrap | 1260 | 332 | 54.2 |
+| MMVQ, aligned 8-byte window loads (SSBO) | 1665 | 310 | 53.2 |
+| window loads + nowrap | 1401 | 266 | 55.6 |
+| **window loads through 64-bit pointers (`42d877e`)** | **1380** | **263** | **55.6** |
+
+The cost is the 64-bit address add per load, not the load count; only
+64-bit pointers (buffer_reference, A's address in push constants) let NAK
+fold the constant offsets legally. tg128: Q4_K_M 52.7 → 55.6, Q5_K_M
+48.7 → 51.3, Q4_0 58.3 → 58.4, IQ4_XS 57.1 → 57.3. PPL Q4_K_M unchanged.
+
+Types without a model on the board, `test-backend-ops perf` MUL_MAT
+4096×14336 n=1 (µs; nowrap = upper bound for folding):
+
+| type | before | nowrap | now | change |
+|---|---|---|---|---|
+| q2_K | 780 | 676 | 689 | `8f35297` (pointers, 4-byte loads) |
+| q3_K | 1951 | 1578 | 1576 | `7659de7` (pointers + window loads) |
+| iq1_m | 1231 | 958 | 963 | `8f35297` (scales as one 8-byte load, no pointers) |
+| iq1_s | 768 | 729 | 763 | not done (−4% max) |
+| q5_0 | 1311 | 1258 | 1309 | not done (−3% max) |
+| q4_0, q5_1, q8_0 | 917, 1338, 1708 | same | same | nothing to gain |
+
+q2_K with 8-byte window loads gained nothing (790): its blocks are 4-byte
+aligned and the extra realign ALU ate the gain; plain 4-byte loads through
+pointers got the full fold.
+
+Process note: two k23 runs benchmarked a stale binary because the job
+ignored shader compile errors; jobs now stop on BUILD-FAILED.

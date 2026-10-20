@@ -31,6 +31,8 @@ Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
 | MMVQ per-workgroup overhead on small K: multiple subgroups per WG on separate rows, no smem | `ad1c0b8` (gated to NVK GV1xx) | **needs work**: try on other vendors before widening the gate |
 | MMVQ gate/up/SWIGLU fusion (CUDA has it, Vulkan didn't) | `854e05d` | **needs work**: only the NO_SHMEM path; non-NVK paths and MUL_MAT_ID not covered |
 | CUDA backend: `volta_mma_available(cc)` requires `ggml_cuda_highest_compiled_arch(cc) == 700`. An sm_72 (Xavier) build reports 720, so Xavier never gets the MMA flash-attention kernel and uses `flash_attn_tile` (no tensor cores) even for pp512. Confirmed in the nsys profile | none yet: test `>= VOLTA && < TURING` on the board | **report** |
+| MMVQ scalar loads: the q4_K/q5_K/iq4_xs/q8_1 reads were scalar 32-bit loads the compiler couldn't merge; vector views fix it on any driver | `39da5ea`, iq1_m part of `8f35297` | **ready**: needs numbers on another GPU |
+| MMVQ for 2-byte-aligned blocks (q2_K/q3_K/q6_K) through 64-bit pointers so constant offsets fold | `42d877e`, `7659de7`, `8f35297` (gated to NVK Volta) | **needs work**: measure on Turing+/RADV before widening the gate |
 | Volta f16 GEMM path, int8 coopmat probe | `b4bb19c`, `005a3a5` | **needs work**: depends on Mesa Volta coopmat landing |
 
 ## Local / board (not upstream, keep in mind)

@@ -24,14 +24,16 @@ generation and launch shape, not exotic instructions.
 
 00. **Done 2026-10-20: MMVQ vector loads** (llama.cpp `39da5ea`): Q4_K_M tg
     45.1 → 52.7, Q5_K_M 38.9 → 48.7, IQ4_XS 52.1 → 57.1. Follow-ups:
-    - Same treatment for the other MMVQ types: q2_K/q3_K/q6_K (16-bit
-      loads now), Q4_0/Q4_1/Q5_x (QUANT_R 2 reads idx and idx+4 from B;
-      restructure so they become one vector), iq1/iq2/iq3.
-    - q6_K lm_head (1.45 ms) uses the non-MMVQ path; try MMVQ q6_K with
-      vector loads.
-    - Dequant and other mat-vec shaders: check NAK dumps for scalar loads.
-    - `NAK_DEBUG=nowrap` (`df97444`) is now mostly redundant; nowrap on top
-      of vector loads is slightly slower.
+    - Done for the other types: q6_K `42d877e`, q3_K `7659de7`, q2_K and
+      iq1_m `8f35297` (see LOG). Not worth it: q4_0/q5_1/q8_0 (no fold
+      gain), iq1_s/q5_0 (≤ 4%).
+    - Q4_0 tg is now limited by its 2-byte loads (18-byte blocks) and
+      QUANT_R 2 B reads (idx and idx+4); restructuring the thread mapping
+      so each thread reads 16 contiguous bytes of q8_1 is the next idea.
+    - Dequant (non-MMVQ) mat-vec shaders and the pp dequant shaders: check
+      NAK dumps for scalar loads the same way.
+    - Upstream: the A_BDA path is gated to NVK Volta; it may help other
+      NVK GPUs (Turing+) and RADV. Needs measurements there.
 
 0. **Done 2026-10-20: GPU L2 caching for NVK on Tegra** (uvmm_sysmem_vol=0 +
    Mesa `972938f`): +12% pp, +11% tg. Follow-ups:
