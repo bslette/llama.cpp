@@ -41,6 +41,7 @@ layout (binding = 0) readonly buffer A {uvec4 data_a[];};   // 8 f16 per element
 #endif
 layout (binding = 1) readonly buffer B {uvec4 data_b[];};
 layout (binding = 2) writeonly buffer D {float data_d[];};
+layout (binding = 2) writeonly buffer D4 {vec4 data_d4[];};
 
 layout (push_constant) uniform parameter {
     uint M;
@@ -178,9 +179,35 @@ void main() {
         }
         buf ^= 1;
     }
+#if WARPS_M * WARPS_N == 4 && 16 * WTN == 64
+    // Epilogue: each subgroup stages its 64x64 f16 tile in shared memory (free once the K loop
+    // is done: subgroups 0, 1 use sa[0], sa[1] and 2, 3 use sb[0], sb[1]) and writes it out as
+    // coalesced vec4s of f32, instead of moving the f16 accumulators to the f32 layout and
+    // storing single floats.  Needs stride_d and the output offset aligned to 4 floats.
+    barrier();
+    const uint dm = m0 + wm * 64, dn = n0 + wn * 64;
+    const uint lane = gl_SubgroupInvocationID;
+#define VOLTA_EPILOGUE(T) \
+    [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) { \
+        coopMatStore(acc[i][j], T, j * 16 * 64 + i * 16, 64, gl_CooperativeMatrixLayoutColumnMajor); \
+    } \
+    subgroupMemoryBarrierShared(); \
+    subgroupBarrier(); \
+    [[unroll]] for (uint it = 0; it < 32; it++) { \
+        const uint c = it * 2 + lane / 16, r = (lane % 16) * 4; \
+        const vec4 v = vec4(T[c * 64 + r], T[c * 64 + r + 1], T[c * 64 + r + 2], T[c * 64 + r + 3]); \
+        data_d4[((dn + c) * p.stride_d + dm + r) / 4] = v; \
+    }
+    if (warp < 2) {
+        VOLTA_EPILOGUE(sa[warp])
+    } else {
+        VOLTA_EPILOGUE(sb[warp - 2])
+    }
+#else
     [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
         coopMatStore(coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(acc[i][j]), data_d,
                      (n0 + wn * 16 * WTN + j * 16) * p.stride_d + m0 + wm * 64 + i * 16, p.stride_d,
                      gl_CooperativeMatrixLayoutColumnMajor);
     }
+#endif
 }

@@ -6469,7 +6469,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
                             ggml_vk_dim01_contiguous(src0) && ggml_vk_dim01_contiguous(src1) &&
                             ne02 == 1 && ne03 == 1 && ne12 == 1 && ne13 == 1 &&
                             ne01 % 128 == 0 && ne11 % 128 == 0 && ne10 % 32 == 0 &&
-                            dst->nb[1] % sizeof(float) == 0 &&
+                            dst->nb[1] % (4 * sizeof(float)) == 0 && dst->view_offs % 16 == 0 &&
                             ggml_vk_get_to_fp16(ctx, src0->type) != nullptr;
     // q4_0 can be dequantized inside the Volta GEMM instead of in a separate pass (opt-in)
     vk_pipeline volta_pipeline = !volta_gemm ? nullptr :
