@@ -42,7 +42,7 @@ layout (binding = 3) readonly buffer I {uvec2 data_i[];};
 #extension GL_KHR_shader_subgroup_basic : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 #ifndef RMS_CACHE
-#define RMS_CACHE true
+#define RMS_CACHE false
 #endif
 #ifndef BLOCK_SIZE
 #define BLOCK_SIZE 512
