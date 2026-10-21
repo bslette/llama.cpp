@@ -7,7 +7,8 @@ ChatterUI works. drm_hwcomposer fork rey-24 (e7a1d91 colorspace init, d122bc5
 per-layer plane check) keeps a streaming chat on planes (efficiency 0.98).
 Manifest overrides for all forks: stealth .repo/local_manifests/zz-bslette-forks.xml.
 Next:
-1. In-app tg 16.7 vs 18.8 without UI: GPU channel switching with the app's GL
+1. (Closed by the ChatterUI fork: 250 ms + reduce motion = 18.6 t/s, LOG 2026-10-21 night.)
+   In general, GPU channel switching with an app's GL
    context (LOG 2026-10-21 evening). Options: nouveau runlist/TSG priority or
    timeslice for Volta + NVK global priority HIGH for llama; or a client that
    redraws less per token.

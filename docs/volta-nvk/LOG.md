@@ -649,3 +649,30 @@ fastboot reboot`: Android up 65 s later. Now `flash-slota.sh --reboot`. Do not
 probe PMC SCRATCH_15 (0x0C390418, cboot's boot chain register) from Linux: the
 AON scratch block is firewalled and the access panicked the kernel (CBB SLV
 errors).
+
+## 2026-10-21 (night): ChatterUI fork, redraw rate and motion
+
+Fork bslette/ChatterUI, branch motion-settings (1b05e38 + 6e55e6f on upstream
+1753a4a, AGPL-3.0). New settings: Chat Window > Streaming update interval
+(ms, 0 = every token; Chats.useBuffer() throttles re-renders, the store still
+takes every token) and Screen > Reduce Motion (ReducedMotionConfig Always,
+no screen transitions, no chat bubble height animation, still typing dots, no
+button fade or animated scroll jumps). Upstream re-rendered the Markdown on
+every token and animated the bubble height with a JS-driven Animated.timing
+after every change. Build: `experiments/android/build-chatterui.sh` (podman,
+reactnativecommunity/react-native-android, APP_VARIANT=rey ->
+com.Vali98.ChatterUI.rey next to upstream; Gradle needs -Xmx8g / 2g
+metaspace).
+
+Qwen2.5-3B Q4_K_M, llama-server -t 2 --poll 0, 256-token replies:
+
+| ChatterUI fork setting | tg t/s | app frames / reply |
+|---|---|---|
+| 0 ms, motion on (= upstream) | 16.65 | 420 |
+| 250 ms, motion on | 17.66 | 240 |
+| 0 ms, reduce motion | 17.30 | 278 |
+| 100 ms, reduce motion | 18.08 | 158 |
+| 250 ms, reduce motion | 18.64 | 78 |
+| server, no UI | 18.4-18.9 | - |
+
+250 ms + reduce motion closes the whole in-app gap.
