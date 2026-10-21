@@ -329,3 +329,54 @@ pointers got the full fold.
 
 Process note: two k23 runs benchmarked a stale binary because the job
 ignored shader compile errors; jobs now stop on BUILD-FAILED.
+
+## 2026-10-20 (later): cross-GPU validation of the MMVQ changes
+
+Builds: base `7a5733b` (before the MMVQ load work), head `a8f39f5`, exp =
+head + local env knobs `GGML_VK_MMVQ_BDA` (A_BDA variants on any device) and
+`GGML_VK_MMVQ_Q6` (q6_K through MMVQ on any device); knobs not committed.
+Built once on stealth in an ubuntu:24.04 container with the LunarG SDK glslc
+(Ubuntu 24.04's glslc lacks GL_EXT_integer_dot_product, so it builds no MMVQ
+shaders at all), no AVX2. Scripts: stealth `~/xval/` (xval-build.sh,
+xval-run.sh, xval-perf.sh), models in `~/xval/tl` on every host.
+
+| host | GPU | driver | int dot |
+|---|---|---|---|
+| stealth | RX 7800 XT (RDNA3) | RADV, Mesa 26.0.8 | yes |
+| aimini | RTX 3050 (GA107) | NVK, Mesa 26.0.8 distro / `~/nvk-check/main-fixed` | yes |
+| oldcrustylx | RX 5700 XT (RDNA1) | RADV | no (MMVQ never used) |
+| bazzite | RTX 4060 Laptop (AD107) | NVIDIA 615.78 | yes |
+
+Correctness (MUL_MAT n≤8 1536, MUL_MAT_ID n≤8 434, MUL_MAT_VEC_FUSION 1265),
+head and exp (also with GGML_VK_FORCE_MMVQ): all pass on all four. On
+aimini the distro NVK loses the device in MUL_MAT for base and head alike
+(iq1_m, the NAK IDP.4A-immediate bug, Mesa `6656192`); with the fixed NVK
+build everything passes.
+
+`test-backend-ops perf` MUL_MAT 4096×14336, µs, base → head (exp where it
+differs):
+
+| type | RTX 4060 (NVIDIA) n=1 / n=4 | RTX 3050 (NVK) n=4, 3 runs | RX 7800 XT n=1 / n=4, 3 runs |
+|---|---|---|---|
+| q4_K | 78 → 62 / 191 → 114 | 830–873 → 603–624 | ±2% |
+| q5_K | 165 → 165 / 233 → 172 | 760–860 → 639–693 | +1–2% / 0 |
+| iq4_xs | 109 → 90 / 211 → 133 | noisy, ≈ −10% | −1.5% |
+| q3_K | 118 → 102 / 226 → 153 | 708–744 → 522–650 | ±1% |
+| q2_K | 50 → 48 / 141 → 115 | ≈ −10% | ±1% |
+| iq1_m | 70 → 70 / 239 → 230 | 426 → 400 / 999 → 980 | **+3%** (63.4 → 65.7) |
+| q6_K exp (BDA + MMVQ) | n=4 247 → 202 | n=1 −17%, n=4 +0–6% | **n=1 +20%** |
+| q2_K/q3_K exp (BDA) | ≈ 0 | mixed | **n=1 +10–24%** |
+
+RX 5700 XT: all within noise (no int dot, so no MMVQ). TinyLlama llama-bench:
+no change beyond noise on any of them (k = 2048 mostly takes the DMMV path
+on these vendors).
+
+Conclusions:
+- Vector loads (`39da5ea`) are a large win on both NVIDIA drivers (q4_K
+  −21–40%, iq4_xs −18–37%, q3_K −14–32% from the q8_1 ivec4 loads) and
+  neutral on RDNA3: fine to upstream ungated.
+- iq1_m scale load (`8f35297`): −1–6% on NVIDIA, +3% on RDNA3. Small either
+  way.
+- A_BDA (gated to NVK Volta): clearly worse on RDNA3, neutral on the
+  NVIDIA driver, mixed on NVK Ampere (q6_K n=1 −17%). Keep the gate; NVK on
+  Turing/Ampere needs a quieter measurement before widening.

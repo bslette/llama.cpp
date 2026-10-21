@@ -32,8 +32,11 @@ generation and launch shape, not exotic instructions.
       so each thread reads 16 contiguous bytes of q8_1 is the next idea.
     - Dequant (non-MMVQ) mat-vec shaders and the pp dequant shaders: check
       NAK dumps for scalar loads the same way.
-    - Upstream: the A_BDA path is gated to NVK Volta; it may help other
-      NVK GPUs (Turing+) and RADV. Needs measurements there.
+    - Cross-GPU check done 2026-10-20 (LOG): vector loads ready for an
+      upstream PR; A_BDA stays gated (RDNA3 slower). Retest A_BDA for q6_K on
+      NVK Ampere with fixed clocks (n=1 −17% but noisy).
+    - Intel iGPU on bazzite (once enabled in firmware): upstream already uses
+      q6_K MMVQ there; run `~/xval/xval-run.sh` with DEV set to the Intel device.
 
 0. **Done 2026-10-20: GPU L2 caching for NVK on Tegra** (uvmm_sysmem_vol=0 +
    Mesa `972938f`): +12% pp, +11% tg. Follow-ups:
