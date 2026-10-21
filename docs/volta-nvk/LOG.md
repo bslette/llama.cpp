@@ -441,3 +441,8 @@ each alone is 0.7-0.9 ms, together 2.3 ms; HMMA at full rate would be about
 - HMMA issue order in NAK is fine (4 independent accumulators per k-chunk).
   245 registers -> 2 workgroups (8 warps) per SM; cuBLAS fits 3 at 168.
 - pp512 now: Q4_0 976, Q8_0 964, Q4_K_M 832, IQ4_XS 923 (CUDA 1030 / 1134).
+- Volta GEMM loads B fragments per K step, then each A fragment right before
+  its four HMMAs (`d4418c8`): 229 registers (still 2 workgroups/SM), NAK
+  overlaps the A loads with the previous HMMAs. 5632x512x2048 4599 -> 4271 us.
+  **pp512 Q4_0 976 -> 1030 = CUDA (1030)**, Q8_0 964 -> 1013 (CUDA 1134),
+  Q4_K_M 832 -> 869, IQ4_XS 923 -> 965. PPL unchanged.

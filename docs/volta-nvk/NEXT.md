@@ -22,6 +22,8 @@ generation and launch shape, not exotic instructions.
 
 ## Prompt processing plan (2026-10-20)
 
+Status 2026-10-21: Q4_0 pp512 1030 = CUDA; Q8_0 1013 vs 1134.
+
 Per pp512 eval, Q4_0, same clocks: NVK 580 ms vs CUDA 497 ms (1030 t/s).
 NVK from GGML_VK_PERF_LOGGER (`/root/prof/pp-now-Q4_0.log`), CUDA from
 `out/perf/cuda-l4t-20261019/nsys-kern-summary.txt` (totals / 4 evals).
