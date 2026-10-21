@@ -4,14 +4,15 @@
 
 #include "rope_params.glsl"
 
-// 8 rows x 32 pairs: rows are often short (64-dim heads), so one row per
-// workgroup would leave most invocations idle. The grid is rows in x and pairs
-// in y, but each run of 32 invocations takes 32 pairs of one row so that loads
-// and stores are contiguous.
+// 8 rows per workgroup, 32 invocations per row stepping through it 32 pairs at a
+// time: rows are often short (64-dim heads), so one row per workgroup would leave
+// most invocations idle. Workgroups cover whole rows; splitting rows into column
+// slices across workgroups made concurrent workgroups hit the same few memory
+// channels on AMD when rows are 512 bytes or wider.
 layout(local_size_x = 8, local_size_y = 32, local_size_z = 1) in;
 
 uint rope_i0() {
-    return 2 * (gl_WorkGroupID.y * 32 + gl_LocalInvocationIndex % 32);
+    return 2 * (gl_LocalInvocationIndex % 32);
 }
 
 uint rope_row() {

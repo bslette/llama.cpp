@@ -4,7 +4,6 @@
 #include "rope_funcs.glsl"
 
 void main() {
-    const uint i0 = rope_i0();
     const uint row = rope_row();
     if (row >= pc.nrows) {
         return;
@@ -13,5 +12,7 @@ void main() {
     const uint i2 = (row - i3 * pc.ne01*pc.ne02) / pc.ne01;
     const uint i1 = (row - i3 * pc.ne01*pc.ne02 - i2 * pc.ne01);
 
-    rope_neox(i0, i1, i2, i3, pc);
+    for (uint i0 = rope_i0(); i0 < pc.ne00; i0 += 64) {
+        rope_neox(i0, i1, i2, i3, pc);
+    }
 }
