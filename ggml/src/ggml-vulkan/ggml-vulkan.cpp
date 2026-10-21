@@ -4942,6 +4942,10 @@ vk_device ggml_vk_get_device(size_t idx) {
         // addresses NAK folds the constant offsets of their loads (it can't with
         // 32-bit buffer offsets)
         device->mmvq_bda = device->mmvq_row_groups > 1 && device->buffer_device_address && device->shader_int64;
+        // 128-invocation rms_norm workgroups for many rows: 30-67% faster on NVK (Volta,
+        // Ada) and Intel, 6-13% slower on RADV (RDNA1/3) and the NVIDIA driver
+        device->rms_norm_rows = device->vendor_id != VK_VENDOR_ID_AMD &&
+                                device->driver_id != vk::DriverId::eNvidiaProprietary;
 
         ggml_vk_load_shaders(device);
 
@@ -9088,7 +9092,7 @@ static vk_pipeline ggml_vk_op_get_pipeline(ggml_backend_vk_context * ctx, const 
             }
             // with many rows, smaller workgroups keep more rows in flight; a single row
             // (token generation) is faster with 512 invocations
-            if (ggml_nrows(src0) >= 64) {
+            if (ctx->device->rms_norm_rows && ggml_nrows(src0) >= 64) {
                 return ctx->fused_rms_norm_mode == RMS_NORM_MUL ? ctx->device->pipeline_rms_norm_mul_rows_f32 : ctx->device->pipeline_rms_norm_rows_f32;
             }
             return ctx->fused_rms_norm_mode == RMS_NORM_MUL ? ctx->device->pipeline_rms_norm_mul_f32 : ctx->device->pipeline_rms_norm_f32;

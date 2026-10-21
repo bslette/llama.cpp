@@ -721,6 +721,7 @@ struct vk_device_struct {
     // Subgroups per workgroup for the subgroup-reduction MMVQ shaders, each on its own rows.
     uint32_t mmvq_row_groups;
     bool mmvq_bda;
+    bool rms_norm_rows;
 
     bool subgroup_size_control;
     uint32_t subgroup_min_size;
