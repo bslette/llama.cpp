@@ -2,11 +2,17 @@
 
 ## Android (2026-10-21)
 
-The Volta stack runs on LineageOS slot a within 1-2% of Linux (LOG
-2026-10-21). Next: the compositor. Measure SurfaceFlinger / drm_hwcomposer
-frames during a llama-bench run (what redraws under GPU load, GPU vs planes),
-then tune drm_hwcomposer flattening and plane assignment so static layers stay
-on planes and nothing recomposes unless it changed. Also: /metadata is full.
+The Volta stack runs on LineageOS slot a within 1-2% of Linux, and llama-server
++ ChatterUI works (LOG 2026-10-21). drm_hwcomposer fix e7a1d91 puts the
+streaming chat's layers on planes (GPU composition -94%, tg +8%) but only runs
+via a tmpfs bind mount until the vendor image is rebuilt and flashed. Next:
+1. Rebuild vendor with e7a1d91 (+ libggml-cpu without dotprod) and flash slot a;
+   push the drm_hwcomposer branch to a fork.
+2. The 12 failed test commits per 300 frames: find which layout Tegra rejects.
+3. In-app tg 16.5 vs 19.6 static: the app's HWUI rendering on the same GPU.
+   Try GPU context priority, or a lighter client (fewer redraws per token).
+4. Short-prompt latency: 32-46 tokens take 1.0-2.8 s (pp512 is 330 t/s).
+5. /metadata is full.
 
 ## Where the gap is (2026-10-20)
 

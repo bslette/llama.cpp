@@ -558,3 +558,47 @@ Perplexity Q4_0 wikitext 10 chunks: 26.4113 (Linux 26.4037).
   stats since boot: 2012 frames, 97 flattened, composition efficiency 0.91;
   last vsync 51 s before the dump. Compositor work under GPU load is next.
 - /metadata (2 MB) is full: apexd cannot write active.tmp. Boot unaffected.
+
+## 2026-10-21 (afternoon): llama.cpp in an Android chat app, compositor planes
+
+Stack: `llama-server` on the board (NVK, `-ngl 99 -fa 1 -c 4096 -np 1`, as the
+shell user) with Qwen2.5-3B-Instruct Q4_K_M, and ChatterUI 0.10.1 (Remote,
+Chat Completions, `http://127.0.0.1:8080/v1/chat/completions`), set up with
+`adb shell input`. Correctness on Android first: MUL_MAT 2339/2339 and
+FLASH_ATTN_EXT 5332/5332 pass.
+
+| Qwen2.5-3B Q4_K_M | pp512 | tg |
+|---|---|---|
+| llama-bench, screen static | 330 | 19.6 (tg128) |
+| ChatterUI, stock drm_hwcomposer | - | 15.2 / 15.4 (100 / 256 tokens) |
+| ChatterUI, fixed drm_hwcomposer | - | 16.6 / 16.5 (256 / 256 tokens) |
+
+Compositor: idle screens already cost nothing (no frames in 20 s). While a
+reply streams, the app redraws at about 25-34 fps, and the stock composer
+flattened every one of those frames to GPU composition: 403 frames in 12 s,
+1018 M pixels, efficiency 0. Tegra194 gives head 0 a primary plane plus
+overlays 43/53/56 (shared windows, possible_crtcs 0xf) and a cursor plane, so
+planes were not the limit; drm_hwcomposer never tested a plane layout
+(0 failed test commits).
+
+Cause (found with a temporary per-frame log in GenericCompositionPlanner):
+flatten reason kNoPerPlaneColorspaceSupport with layers `cs=2` (BT.709) and
+`cs=200563880`. `LayerData::colorspace` had no initializer and
+`HwcLayer::PopulateLayerData()` only writes it for a set dataspace, so UNKNOWN
+layers (status bar, taskbar, most apps) carried heap garbage and every frame
+looked like a colorspace mix. Fix e7a1d91 (stealth
+`external/drm_hwcomposer-upstream`, branch `local-planes-colorspace`):
+value-initialize colorspace/transfer_func and compare kDefault as BT.709 (as
+ToColorGamut() already does). With it: 300 frames in 12 s, 0 flattened,
+GPU composition 53 M pixels (-94%), efficiency 0.93; the four layers scan out
+on planes 0/3/6/7. The rest of the gap to llama-bench is the app's own GPU
+text rendering.
+
+Testing a composer without reflashing: the serial root shell is in the
+bootstrap mount namespace, so bind-mount with `nsenter -t 1 -m`; and init will
+not transition into hal_graphics_composer_default from a nosuid mount (/data),
+so copy the binary to a tmpfs first (label
+hal_graphics_composer_default_exec), bind it over
+`/apex/com.android.hardware.graphics.composer/bin/hw/...`, then `stop; stop
+vendor.hwcomposer-3.drm_upstream; start ...; start`. Check `/proc/<pid>/exe`.
+Reverts on reboot.
