@@ -4,8 +4,8 @@
 #include "rope_funcs.glsl"
 
 void main() {
-    const uint i0 = 2*gl_GlobalInvocationID.y;
-    const uint row = gl_GlobalInvocationID.x + 32768 * gl_GlobalInvocationID.z;
+    const uint i0 = rope_i0();
+    const uint row = rope_row();
     if (row >= pc.nrows) {
         return;
     }
