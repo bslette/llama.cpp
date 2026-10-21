@@ -3223,7 +3223,9 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
         device->driver_id == vk::DriverId::eMesaNvk && strstr(device->properties.deviceName, " GV1") != nullptr &&
         !getenv("GGML_VK_DISABLE_VOLTA_GEMM")) {
         ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_f16, "matmul_f16_volta", matmul_f16_volta_cm1_len, matmul_f16_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
-        if (!getenv("GGML_VK_DISABLE_VOLTA_FUSED")) {
+        // dequantizing q4_0 inside the GEMM is slower than the separate dequant pass now
+        // (its 18-byte blocks are staged with 16-bit loads); opt-in for experiments
+        if (getenv("GGML_VK_VOLTA_FUSED")) {
             ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_q4_0, "matmul_q4_0_volta", matmul_q4_0_volta_cm1_len, matmul_q4_0_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
         }
     }
@@ -6467,8 +6469,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
                             ne01 % 128 == 0 && ne11 % 128 == 0 && ne10 % 32 == 0 &&
                             dst->nb[1] % sizeof(float) == 0 &&
                             ggml_vk_get_to_fp16(ctx, src0->type) != nullptr;
-    // q4_0 is dequantized inside the Volta GEMM instead of in a separate pass (pp512 +3%;
-    // the same for q8_0 measured 9% slower)
+    // q4_0 can be dequantized inside the Volta GEMM instead of in a separate pass (opt-in)
     vk_pipeline volta_pipeline = !volta_gemm ? nullptr :
                                  src0->type == GGML_TYPE_Q4_0 && ctx->device->pipeline_matmul_volta_q4_0 ? ctx->device->pipeline_matmul_volta_q4_0 :
                                  ctx->device->pipeline_matmul_volta_f16;

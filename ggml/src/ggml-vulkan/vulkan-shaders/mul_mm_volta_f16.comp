@@ -9,11 +9,19 @@
 
 // D = A * B^T for f16 A [M][K] and B [N][K] (both K-contiguous, as after dequantizing src0 and
 // converting src1), f32 D column-major in M (ggml dst: D[n * stride_d + m]).  Tuned for Volta
-// (HMMA.884 with f16 accumulators): 128x128 block tile, BK = 32, 256 invocations = 8 subgroups
-// as 2 (M) x 4 (N), 64x32 per subgroup.  The next K tile is loaded into registers while the
-// current one is multiplied from shared memory; shared memory is double-buffered, so each
-// K step needs one barrier.  Requires M, N multiples of 128 and K, strides multiples of 32.
-layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+// (HMMA.884 with f16 accumulators): BM x BN block tile (128x128 by default), BK = 32,
+// WARPS_M x WARPS_N subgroups (2 x 4 by default), 64x32 per subgroup.  The next K tile is
+// loaded into registers while the current one is multiplied from shared memory; shared memory
+// is double-buffered, so each K step needs one barrier.  Requires M, N multiples of BM, BN and
+// K, strides multiples of 32.
+#ifndef BM
+#define BM 128
+#define BN 128
+#define WARPS_M 2
+#define WARPS_N 4
+#endif
+#define THREADS (32 * WARPS_M * WARPS_N)
+layout(local_size_x = THREADS, local_size_y = 1, local_size_z = 1) in;
 
 #if defined(A_Q4_0)
 // A read in place as ggml blocks (one 32-weight block per row per K tile) and dequantized to f16
@@ -38,7 +46,9 @@ layout (push_constant) uniform parameter {
     uint stride_d;
 } p;
 
-const uint BM = 128, BN = 128, BK = 32;
+const uint BK = 32;
+const uint RP = THREADS / 4;           // rows staged per pass, 8 f16 per invocation
+const uint PA = BM / RP, PB = BN / RP;  // passes for A and B
 const uint PITCH = BK + 8;   // f16 per shared row, padded against bank conflicts
 shared float16_t sa[2][BM * PITCH];
 shared float16_t sb[2][BN * PITCH];
@@ -46,31 +56,34 @@ shared float16_t sb[2][BN * PITCH];
 void main() {
     const uint tid = gl_LocalInvocationID.x;
     const uint warp = gl_SubgroupID;
-    const uint wm = warp % 2, wn = warp / 2;
+    const uint wm = warp % WARPS_M, wn = warp / WARPS_M;
     const uint m0 = gl_WorkGroupID.y * BM, n0 = gl_WorkGroupID.x * BN;
     const uint ka = p.stride_a / 8, kb = p.stride_b / 8;
-    const uint lr = tid / 4, lc = tid % 4;   // rows lr and lr + 64, 8 f16 at column 8 * lc
+    const uint lr = tid / 4, lc = tid % 4;   // rows lr + RP * i, 8 f16 at column 8 * lc
 
 #ifdef A_QUANT
-    const uint ar = tid / 2, ah = tid % 2;   // A row ar, half ah of its block
+    const uint ar = tid / 2, ah = tid % 2;   // A rows ar + RQ * q, half ah of their block
+    const uint RQ = THREADS / 2, QP = BM / RQ;
     const uint nblk = p.stride_a / 32;
-    uint qd, qa[QW];
-    {
-        const uint base = (m0 + ar) * nblk * QBLK;
-        qd = uint(data_a[base]);
+    uint qd[QP], qa[QP][QW];
+    [[unroll]] for (uint q = 0; q < QP; q++) {
+        const uint base = (m0 + ar + RQ * q) * nblk * QBLK;
+        qd[q] = uint(data_a[base]);
         [[unroll]] for (uint j = 0; j < QW; j++) {
-            qa[j] = uint(data_a[base + 1 + QW * ah + j]);
+            qa[q][j] = uint(data_a[base + 1 + QW * ah + j]);
         }
     }
-    uvec4 rb[2];
-    [[unroll]] for (uint i = 0; i < 2; i++) {
-        rb[i] = data_b[(n0 + lr + 64 * i) * kb + lc];
+    uvec4 rb[PB];
+    [[unroll]] for (uint i = 0; i < PB; i++) {
+        rb[i] = data_b[(n0 + lr + RP * i) * kb + lc];
     }
 #else
-    uvec4 ra[2], rb[2];
-    [[unroll]] for (uint i = 0; i < 2; i++) {
-        ra[i] = data_a[(m0 + lr + 64 * i) * ka + lc];
-        rb[i] = data_b[(n0 + lr + 64 * i) * kb + lc];
+    uvec4 ra[PA], rb[PB];
+    [[unroll]] for (uint i = 0; i < PA; i++) {
+        ra[i] = data_a[(m0 + lr + RP * i) * ka + lc];
+    }
+    [[unroll]] for (uint i = 0; i < PB; i++) {
+        rb[i] = data_b[(n0 + lr + RP * i) * kb + lc];
     }
 #endif
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc[4][2];
@@ -85,10 +98,11 @@ void main() {
         {
             // (0x6400 | n) is the f16 1024 + n, so the weights come out of one HADD2 and one
             // HMUL2 per pair, exactly as (n - 8) * d rounded to f16.
-            const f16vec2 dd = f16vec2(unpackFloat2x16(qd).x);
-            const uint o = ar * PITCH;
+          [[unroll]] for (uint q = 0; q < QP; q++) {
+            const f16vec2 dd = f16vec2(unpackFloat2x16(qd[q]).x);
+            const uint o = (ar + RQ * q) * PITCH;
             [[unroll]] for (uint j = 0; j < QW; j++) {
-                const uint v = qa[j];
+                const uint v = qa[q][j];
                 const uint lo = (v & 0xFu) | ((v & 0xF00u) << 8);
                 const uint hi = ((v >> 4) & 0xFu) | ((v & 0xF000u) << 4);
                 const f16vec2 wl = (unpackFloat2x16(lo | 0x64006400u) - f16vec2(1032.0hf)) * dd;
@@ -96,21 +110,27 @@ void main() {
                 sa[buf][o + 8 * ah + 2 * j] = wl.x; sa[buf][o + 8 * ah + 2 * j + 1] = wl.y;
                 sa[buf][o + 16 + 8 * ah + 2 * j] = wh.x; sa[buf][o + 16 + 8 * ah + 2 * j + 1] = wh.y;
             }
+          }
         }
-        [[unroll]] for (uint i = 0; i < 2; i++) {
-            const uint o = (lr + 64 * i) * PITCH + lc * 8;
+        [[unroll]] for (uint i = 0; i < PB; i++) {
+            const uint o = (lr + RP * i) * PITCH + lc * 8;
             [[unroll]] for (uint w = 0; w < 4; w++) {
                 const f16vec2 y = unpackFloat2x16(rb[i][w]);
                 sb[buf][o + 2 * w] = y.x; sb[buf][o + 2 * w + 1] = y.y;
             }
         }
 #else
-        [[unroll]] for (uint i = 0; i < 2; i++) {
-            const uint o = (lr + 64 * i) * PITCH + lc * 8;
+        [[unroll]] for (uint i = 0; i < PA; i++) {
+            const uint o = (lr + RP * i) * PITCH + lc * 8;
             [[unroll]] for (uint w = 0; w < 4; w++) {
                 const f16vec2 x = unpackFloat2x16(ra[i][w]);
-                const f16vec2 y = unpackFloat2x16(rb[i][w]);
                 sa[buf][o + 2 * w] = x.x; sa[buf][o + 2 * w + 1] = x.y;
+            }
+        }
+        [[unroll]] for (uint i = 0; i < PB; i++) {
+            const uint o = (lr + RP * i) * PITCH + lc * 8;
+            [[unroll]] for (uint w = 0; w < 4; w++) {
+                const f16vec2 y = unpackFloat2x16(rb[i][w]);
                 sb[buf][o + 2 * w] = y.x; sb[buf][o + 2 * w + 1] = y.y;
             }
         }
@@ -119,18 +139,22 @@ void main() {
         if (kt + 1 < ktiles) {
             const uint kk = (kt + 1) * (BK / 8);
 #ifdef A_QUANT
-            const uint base = ((m0 + ar) * nblk + kt + 1) * QBLK;
-            qd = uint(data_a[base]);
-            [[unroll]] for (uint j = 0; j < QW; j++) {
-                qa[j] = uint(data_a[base + 1 + QW * ah + j]);
+            [[unroll]] for (uint q = 0; q < QP; q++) {
+                const uint base = ((m0 + ar + RQ * q) * nblk + kt + 1) * QBLK;
+                qd[q] = uint(data_a[base]);
+                [[unroll]] for (uint j = 0; j < QW; j++) {
+                    qa[q][j] = uint(data_a[base + 1 + QW * ah + j]);
+                }
             }
-            [[unroll]] for (uint i = 0; i < 2; i++) {
-                rb[i] = data_b[(n0 + lr + 64 * i) * kb + kk + lc];
+            [[unroll]] for (uint i = 0; i < PB; i++) {
+                rb[i] = data_b[(n0 + lr + RP * i) * kb + kk + lc];
             }
 #else
-            [[unroll]] for (uint i = 0; i < 2; i++) {
-                ra[i] = data_a[(m0 + lr + 64 * i) * ka + kk + lc];
-                rb[i] = data_b[(n0 + lr + 64 * i) * kb + kk + lc];
+            [[unroll]] for (uint i = 0; i < PA; i++) {
+                ra[i] = data_a[(m0 + lr + RP * i) * ka + kk + lc];
+            }
+            [[unroll]] for (uint i = 0; i < PB; i++) {
+                rb[i] = data_b[(n0 + lr + RP * i) * kb + kk + lc];
             }
 #endif
         }
