@@ -15,6 +15,8 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | `NAK_DEBUG=nowrap` on top of vector loads | Q4_K_M 52.7 → 51.3, Q5_K_M 48.7 → 48.0 | the fold no longer pays once loads are vectors |
 | q6_K MMVQ with aligned 8-byte window loads through SSBOs (no pointers) | lm_head 1455 → 1665 µs | load count wasn't the cost; the per-load 64-bit address add was |
 | q2_K with 8-byte window loads through pointers | 780 → 790 µs | blocks are 4-byte aligned already; realign ALU ate the gain (plain 4-byte loads through pointers: 689) |
+| 64x64-tile, 2-subgroup Volta GEMM for small matrices | k/v proj 344 → 474 µs; everything small: pp512 Q4_0 659 | half the reuse per load; SM balance gain is smaller than that |
+| q4_0 fused dequant in the Volta GEMM after `edb5d1c` | pp512 889 vs 929 unfused | 16-bit loads from 18-byte blocks while staging; opt-in now |
 | Blanket address fold with the L2 on (`NAK_DEBUG=nowrap`) for every shader | q6_K mat-vec +12–15% slower, Q4_1 tg −3.5% | the gain is per shader; apply it only to q4_K/q5_K/iq4_xs |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 

@@ -40,10 +40,11 @@ epilogue, q4_0 A staged with 16-bit LDGs). The coopmat FA shader has 128
 scalar `ld.shared.u16`.
 
 Ranked:
-1. 64x64-tile GEMM variant for m <= 512 (k/v projections 256x512x2048 run at
-   1.6 TFLOPS: 337 vs CUDA 213 µs). ~ -5 ms.
-2. rms_norm (469 µs/call vs 225) and rope (497 vs ~290): NAK dump, vector
-   loads, workgroup shape. ~ -15 ms.
+1. ~~64x64 tiles~~ slower (DIDNT-WORK); split-K for the k/v projections
+   (8 tiles on 6 SMs) is the remaining idea, ~ -5 ms. Separate A/B staging
+   loops gave -6-8% on every GEMM (`edb5d1c`).
+2. rope done (`2a404d7`, 497 -> 165 µs). rms_norm (470 µs/call vs CUDA 225):
+   smaller workgroups, row kept in registers. ~ -10 ms.
 3. Coopmat FA: vectorize the 128 u16 shared loads, then remeasure. -10..20 ms.
 4. Measure first: ablation on the real `mul_mm_volta_f16` (not gemmbench)
    and an LDS bank-conflict probe. If conflict-bound, swizzle the smem layout.

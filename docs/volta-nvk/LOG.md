@@ -380,3 +380,20 @@ Conclusions:
 - A_BDA (gated to NVK Volta): clearly worse on RDNA3, neutral on the
   NVIDIA driver, mixed on NVK Ampere (q6_K n=1 −17%). Keep the gate; NVK on
   Turing/Ampere needs a quieter measurement before widening.
+
+## 2026-10-20 (later): prompt processing, steps 1-2
+
+- Step 1 (64x64 tiles for small GEMMs) failed: a BM/BN-parametrized
+  `mul_mm_volta_f16` with a 64x64, 2-subgroup variant made the 256x512x2048
+  k/v projection slower (344 -> 474 us; all-small: pp512 Q4_0 659).
+- But the parametrized shader stages A and B in separate loops, and that
+  alone made every f16 GEMM call 6-8% faster (A/B against the committed
+  shader: Q8_0 pp512 865 -> 912). The fused q4_0 path got 1.5% slower and is
+  now behind the separate dequant + f16 GEMM (Q4_0 889 fused vs 929
+  unfused), so fusion is opt-in (`GGML_VK_VOLTA_FUSED=1`). llama.cpp `edb5d1c`.
+- Rope ran 1 row per 256-invocation workgroup; with 64-dim heads 224 of 256
+  invocations were idle. 8 rows x 32 pairs: ROPE 497 -> 165 us (CUDA 245),
+  rope+set_rows 75 -> 31 us. llama.cpp `2a404d7`.
+- pp512 now: Q4_0 903 -> 940, Q8_0 865 -> 925, Q4_K_M 757 -> 805,
+  IQ4_XS 833 -> 891 (CUDA Q4_0 1030, Q8_0 1134). tg unchanged. MUL_MAT,
+  ROPE, ROPE_BACK, FLASH_ATTN_EXT pass; PPL unchanged.

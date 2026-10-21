@@ -18,6 +18,8 @@ All numbers are from Jetson Xavier NX (GV11B) under NVK, TinyLlama-1.1B, unless 
 | `42d877e` | q6_K MMVQ on NVK Volta through 64-bit pointers (A_BDA variant, A address in push constants), aligned 8-byte window loads | q6_K lm_head 1455 → 1380 µs, down 344 → 263 µs; tg Q4_K_M 52.7 → 55.6, Q5_K_M 48.7 → 51.3 |
 | `7659de7` | q3_K MMVQ through the same A_BDA helpers | q3_K 4096×14336 1951 → 1576 µs |
 | `8f35297` | q2_K A_BDA with 4-byte loads; iq1_m scales as one 8-byte load | q2_K 780 → 689 µs, iq1_m 1231 → 963 µs |
+| `edb5d1c` | Volta GEMM stages A and B in separate loops (tile shape parametrized); q4_0 fused dequant opt-in | f16 GEMM −6–8%; pp512 Q4_0 903 → 929, Q8_0 865 → 912 |
+| `2a404d7` | rope workgroups 8 rows × 32 pairs (was 1 row × 256, mostly idle for 64-dim heads) | ROPE 497 → 165 µs; pp512 Q4_0 929 → 940 |
 | `854e05d` | fuse MUL_MAT(up) + MUL_MAT(gate) + SWIGLU into one MMVQ dispatch (spec const `FUSE_GLU`, push consts `a_offset_x`/`gate_delta`; needs both weights in one buffer, whole blocks apart) | Q4_K_M 42.3 → 43.2, Q5_K_M 36.9 → 37.7, Q4_0 neutral |
 
 Correctness: PPL matches CPU/CUDA (Q4_0 23.84, Q8_0 23.10 wikitext 20x512).
