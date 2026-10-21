@@ -9725,7 +9725,11 @@ static void ggml_vk_op_f32(ggml_backend_vk_context * ctx, vk_context& subctx, co
                 z = CEIL_DIV(nrows, 32768);
                 nrows = 32768;
             }
-            elements = { nrows, 1, z };
+            // rows per workgroup, matching rope_lanes() in rope_head.glsl; the
+            // workgroup denominator in x is 8
+            const uint32_t pairs = (uint32_t)(ne00 + 1) / 2;
+            const uint32_t rows_per_wg = pairs <= 64 ? 8 : pairs <= 128 ? 4 : pairs <= 256 ? 2 : 1;
+            elements = { CEIL_DIV(nrows, rows_per_wg) * 8, 1, z };
 
         } break;
     case GGML_OP_GET_ROWS:

@@ -12,7 +12,7 @@ void main() {
     const uint i2 = (row - i3 * pc.ne01*pc.ne02) / pc.ne01;
     const uint i1 = (row - i3 * pc.ne01*pc.ne02 - i2 * pc.ne01);
 
-    for (uint i0 = rope_i0(); i0 < pc.ne00; i0 += 64) {
+    for (uint i0 = rope_i0(); i0 < pc.ne00; i0 += 2 * rope_lanes()) {
         rope_neox(i0, i1, i2, i3, pc);
     }
 }
