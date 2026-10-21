@@ -20,6 +20,44 @@ The CUDA mat-vec kernels are plain: 32-bit `LDG.E.CONSTANT` loads, IDP.4A,
 128 threads/row, 39 regs, 68% occupancy. The difference is in code
 generation and launch shape, not exotic instructions.
 
+## Prompt processing plan (2026-10-20)
+
+Per pp512 eval, Q4_0, same clocks: NVK 580 ms vs CUDA 497 ms (1030 t/s).
+NVK from GGML_VK_PERF_LOGGER (`/root/prof/pp-now-Q4_0.log`), CUDA from
+`out/perf/cuda-l4t-20261019/nsys-kern-summary.txt` (totals / 4 evals).
+
+| work | NVK | CUDA | gap |
+|---|---|---|---|
+| matmuls incl. dequant/convert | 421 | 355 (GEMM 202 at 5.0 TFLOPS + dequant 100 + f32/f16 converts 43 + 64x64 gemm 9) | **+66** |
+| flash attention | 86 | 84 (flash_attn_tile + combine, no tensor cores) | +2 |
+| rms_norm | 20 | 10 | +10 |
+| rope | 11 | 6 | +5 |
+| GLU + add | 24 | 23 | +1 |
+
+NAK dump of the pp shaders: the Volta GEMM's fragment loads are already
+LDS.128 (24 per K tile for 64 HMMA, 125 regs, 64 scalar STG.32 in the
+epilogue, q4_0 A staged with 16-bit LDGs). The coopmat FA shader has 128
+scalar `ld.shared.u16`.
+
+Ranked:
+1. 64x64-tile GEMM variant for m <= 512 (k/v projections 256x512x2048 run at
+   1.6 TFLOPS: 337 vs CUDA 213 µs). ~ -5 ms.
+2. rms_norm (469 µs/call vs 225) and rope (497 vs ~290): NAK dump, vector
+   loads, workgroup shape. ~ -15 ms.
+3. Coopmat FA: vectorize the 128 u16 shared loads, then remeasure. -10..20 ms.
+4. Measure first: ablation on the real `mul_mm_volta_f16` (not gemmbench)
+   and an LDS bank-conflict probe. If conflict-bound, swizzle the smem layout.
+   Then warp tile 64x64 with 128-thread workgroups (cuBLAS shape): a third
+   fewer fragment LDS per HMMA, more independent HMMAs per warp. Prototype in
+   gemmbench (3.13 -> >4 TFLOPS), watch NAK RA (<= 168 regs, no spills).
+   Up to -100 ms; ~12% GEMM speedup is enough to pass CUDA.
+5. GEMM global side: wider loads for fused q4_0 staging, 3-stage pipeline,
+   STG.128 epilogue via smem. -10..30 ms.
+6. Q8_0 fused dequant again with aligned-window loads (34-byte blocks).
+   Q8_0 only, ~ -10 ms.
+
+Expected: 1-3 take Q4_0 pp512 ~900 -> ~950 t/s; 4 is what passes 1030.
+
 ## Plan
 
 00. **Done 2026-10-20: MMVQ vector loads** (llama.cpp `39da5ea`): Q4_K_M tg
