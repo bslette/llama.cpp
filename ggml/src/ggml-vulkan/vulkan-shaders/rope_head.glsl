@@ -4,7 +4,9 @@
 
 #include "rope_params.glsl"
 
-layout(local_size_x = 1, local_size_y = 256, local_size_z = 1) in;
+// 8 rows x 32 pairs: rows are often short (64-dim heads), so one row per
+// workgroup would leave most invocations idle
+layout(local_size_x = 8, local_size_y = 32, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer X {A_TYPE rope_data_a[];};
 layout (binding = 1) readonly buffer Y {int rope_data_pos[];};
