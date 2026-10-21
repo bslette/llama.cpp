@@ -62,12 +62,23 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 |---|---|---|
 | `e7a8ffd` | nouveau `uvmm_sysmem_vol` module param (0 = VM_BIND sysmem L2-cacheable), on top of the board's `rey-nouveau-gv11b-6.18` (977d70d) | with Mesa `972938f`: pp +12%, tg +11% |
 
+## Android: LineageOS 24.0 galen_tab (stealth `~/android/lineage-24.0`)
+
+| Commit | Change | Measured |
+|---|---|---|
+| Mesa `rey-nouveau-gv11b-24-volta` 08bdef6 | volta-cmat-int8 + Android build commits + c268c68 (L2 maint switch via os_get_option) | Android TinyLlama Q4_0 1016 / 57.5, Q8_0 1002 / 41.3 (Linux 1031 / 58.6, 1011 / 42.1) |
+| kernel `rey-nouveau-gv11b-6.18-v68-l2` ff75efd | uvmm_sysmem_vol on the Android kernel | with cmdline `nouveau.uvmm_sysmem_vol=0` |
+| galen `rey-24` 4c6bc2d + follow-up | NVK cmat + L2 properties, llama.cpp in /system_ext | PPL 26.41 (Linux 26.40) |
+
 ## Tooling (bazzite `lineage/tools/`, not in git)
 
 - `tools/jobs/jobs.sh`: `launch` / `wait` / `waitp`. Launch is detached and
   checks that the job started. Waits are deadline-bound and report
   DONE/FAILED/DIED/STALLED/OVERDUE/UNREACHABLE. `JOB_LAUNCH=systemd` is needed
   for root via su.
-- `tools/slotb/flash-slotb.sh`: `l4t` | `linux618` | `restore` slot b images
+- `tools/slota/flash-slota.sh`: writes a Lineage build to slot a from Linux on
+  slot b (new super table via lpmake, backup + readback verify, `restore`).
+  Copy in `experiments/android/`.
+- `tools/slotb/flash-slotb.sh` (`KERNEL=` overrides the linux618 image): `l4t` | `linux618` | `restore` slot b images
   (boot_b, kernel-dtb_b, vendor_boot_b with `root=LABEL=...`), with readback verify.
 - Board: `/var/tmp/build-mesa.sh`, `/var/tmp/mmvq-bench.sh TAG`, `/var/tmp/nakdump.sh`.

@@ -512,3 +512,49 @@ neutral. RTX 4060 NVK: q4_K n=4 299 -> 232 us, q5_K n=4 359 -> 275, iq4_xs
 n=4 400 -> 226, q2_K n=4 238 -> 151 (tg at 230 t/s is not GPU bound there).
 The opt-in BDA knobs (exp) help Intel tg (UHD 770 Q4_K_M 28.2 -> 36.4,
 Q5_K_M 25.1 -> 31.6; Iris Xe +2-5%) through q6_K/q3_K MMVQ.
+
+## 2026-10-21: LineageOS 24.0 with the Volta work, on slot a
+
+Built on stealth (`~/android/lineage-24.0`, full `bacon`, 17 min) and written to
+slot a from Linux on slot b with `experiments/android/flash-slota.sh`:
+
+- Mesa `rey-nouveau-gv11b-24-volta` (08bdef6): `volta-cmat-int8` e943159 + the
+  two Android build commits + c268c68 (NVK_L2_SYSMEM_MAINT through
+  os_get_option, so the vendor property reaches apps; SELinux keeps apps from
+  reading /sys/module/nouveau/parameters).
+- Kernel `rey-nouveau-gv11b-6.18-v68-l2` (ff75efd): v68 + uvmm_sysmem_vol.
+- galen `rey-24`: vendor_boot cmdline `nouveau.uvmm_sysmem_vol=0`, properties
+  `vendor.mesa.nvk.volta.cmat=1`, `vendor.mesa.nvk.l2.sysmem.maint=1`, and
+  llama.cpp (volta-nvk f35ec04, NDK r27c, Vulkan, shared libs) as prebuilts in
+  /system_ext/bin + /system_ext/lib64.
+
+super (SD card, mmcblk0p23) needed a new partition table: system_ext grew
+467 -> 524 MB and vendor by 77 KB. The OTA zip is not usable here: it installs
+to the inactive slot (b = Linux) and its postinstall runs
+nv_bootloader_payload_updater. Linux 6.18 does not see the QSPI (SMD slot
+state), so slot a was reached by letting slot b's retries run out.
+
+Android /data is on NVMe p1 (ext4 with the quota feature): the slot b 6.18
+kernel was rebuilt with QFMT_V2 (`experiments/android/build-kernel-618.inner.sh`)
+so Linux can mount it rw; models staged in /data/local/tmp/llama with
+security.selinux = shell_data_file.
+
+Results on Android, same flags as Linux (`llama-bench -fa 1 -p 512 -n 128`),
+UI up (lock screen):
+
+| TinyLlama | Android | Linux 6.18 | CUDA L4T |
+|---|---|---|---|
+| Q4_0 pp512 / tg128 | 1016 / 57.5 | 1031 / 58.6 | 1030 / 62.8 |
+| Q8_0 pp512 / tg128 | 1002 / 41.3 | 1011 / 42.1 | 1134 / 40.0 |
+
+Perplexity Q4_0 wikitext 10 chunks: 26.4113 (Linux 26.4037).
+
+- The first Android build used `-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16`:
+  Carmel has no dotprod (Features: fphp asimdhp asimdrdm atomics, no
+  asimddp), so test-backend-ops died with SIGILL in ggml_vec_dot_q4_0_q8_0
+  (the CPU reference). Fixed to `armv8.2-a+fp16`; llama-bench/perplexity
+  were unaffected (all GPU).
+- SurfaceFlinger at idle: all 3 layers CLIENT at dump time, but drm_hwcomposer
+  stats since boot: 2012 frames, 97 flattened, composition efficiency 0.91;
+  last vsync 51 s before the dump. Compositor work under GPU load is next.
+- /metadata (2 MB) is full: apexd cannot write active.tmp. Boot unaffected.

@@ -1,5 +1,13 @@
 # What to try next (ranked)
 
+## Android (2026-10-21)
+
+The Volta stack runs on LineageOS slot a within 1-2% of Linux (LOG
+2026-10-21). Next: the compositor. Measure SurfaceFlinger / drm_hwcomposer
+frames during a llama-bench run (what redraws under GPU load, GPU vs planes),
+then tune drm_hwcomposer flattening and plane assignment so static layers stay
+on planes and nothing recomposes unless it changed. Also: /metadata is full.
+
 ## Where the gap is (2026-10-20)
 
 Token generation, Q4_0: NVK about 19.2 ms/token vs CUDA 16.0.
