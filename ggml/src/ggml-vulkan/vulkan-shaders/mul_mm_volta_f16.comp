@@ -10,7 +10,9 @@
 // D = A * B^T for f16 A [M][K] and B [N][K] (both K-contiguous, as after dequantizing src0 and
 // converting src1), f32 D column-major in M (ggml dst: D[n * stride_d + m]).  Tuned for Volta
 // (HMMA.884 with f16 accumulators): BM x BN block tile (128x128 by default), BK = 32,
-// WARPS_M x WARPS_N subgroups (2 x 4 by default), 64x32 per subgroup.  The next K tile is
+// WARPS_M x WARPS_N subgroups (2 x 2 by default), 64 x (16 * WTN) per subgroup (64x64 by
+// default, like cuBLAS' h884 128x128 kernel: fewer fragment loads per HMMA than 64x32
+// with eight subgroups, at about 250 registers).  The next K tile is
 // loaded into registers while the current one is multiplied from shared memory; shared memory
 // is double-buffered, so each K step needs one barrier.  Requires M, N multiples of BM, BN and
 // K, strides multiples of 32.
@@ -18,7 +20,10 @@
 #define BM 128
 #define BN 128
 #define WARPS_M 2
-#define WARPS_N 4
+#define WARPS_N 2
+#endif
+#ifndef WTN
+#define WTN 4   // 16-column fragments per subgroup
 #endif
 #define THREADS (32 * WARPS_M * WARPS_N)
 layout(local_size_x = THREADS, local_size_y = 1, local_size_z = 1) in;
@@ -86,8 +91,8 @@ void main() {
         rb[i] = data_b[(n0 + lr + RP * i) * kb + lc];
     }
 #endif
-    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc[4][2];
-    [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < 2; j++) {
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc[4][WTN];
+    [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
         acc[i][j] = coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0hf);
     }
 
@@ -160,22 +165,22 @@ void main() {
         }
         [[unroll]] for (uint ks = 0; ks < BK; ks += 16) {
             coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> fa[4];
-            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> fb[2];
+            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> fb[WTN];
             [[unroll]] for (uint i = 0; i < 4; i++) {
                 coopMatLoad(fa[i], sa[buf], (wm * 64 + i * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutRowMajor);
             }
-            [[unroll]] for (uint j = 0; j < 2; j++) {
-                coopMatLoad(fb[j], sb[buf], (wn * 32 + j * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutColumnMajor);
+            [[unroll]] for (uint j = 0; j < WTN; j++) {
+                coopMatLoad(fb[j], sb[buf], (wn * 16 * WTN + j * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutColumnMajor);
             }
-            [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < 2; j++) {
+            [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
                 acc[i][j] = coopMatMulAdd(fa[i], fb[j], acc[i][j]);
             }
         }
         buf ^= 1;
     }
-    [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < 2; j++) {
+    [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
         coopMatStore(coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(acc[i][j]), data_d,
-                     (n0 + wn * 32 + j * 16) * p.stride_d + m0 + wm * 64 + i * 16, p.stride_d,
+                     (n0 + wn * 16 * WTN + j * 16) * p.stride_d + m0 + wm * 64 + i * 16, p.stride_d,
                      gl_CooperativeMatrixLayoutColumnMajor);
     }
 }
