@@ -13,11 +13,12 @@
 #   --no-backup  skip saving slot a on the board first (default: save it to
 #              /var/tmp/slota-backup-<time> on the board's NVMe)
 #   --backup-only  stage and save slot a on the board, write nothing
-#   --reboot   reboot the board after writing
+#   --reboot   after writing, reboot to cboot fastboot, set slot a active and boot it
 #
-# Slot a only boots once cboot picks it: Linux can't reach the SMD slot state in QSPI,
-# so either let slot b's retry count run out (repeated resets), or from Android:
-# service call android.hardware.boot.IBootControl/default 9 i32 0.
+# Slot a only boots once cboot picks it: from Linux, `systemctl reboot
+# --reboot-argument=bootloader` enters cboot fastboot, then `fastboot set_active a;
+# fastboot reboot` (what --reboot does). From Android: service call
+# android.hardware.boot.IBootControl/default 9 i32 0.
 #
 # env: BUILD_HOST  host with the Lineage tree (default stealth)
 #      TREE        Lineage tree on BUILD_HOST (default ~/android/lineage-24.0)
@@ -90,11 +91,24 @@ sync'
 
 finish() {
 	local dir=$1
-	if [ $REBOOT = 1 ]; then
-		board_root "bash $dir/write.sh && systemd-run --on-active=2 systemctl reboot >/dev/null && echo rebooting"
-	else
-		board_root "bash $dir/write.sh"
-	fi
+	board_root "bash $dir/write.sh"
+	[ $REBOOT = 1 ] && boot_slot_a
+	return 0
+}
+
+# Reboot into cboot fastboot (Linux "bootloader" reboot reason = PMC SCRATCH0 bit 30,
+# cboot's fastboot flag), make slot a active and boot it. Needs the board's USB device
+# port on this host.
+boot_slot_a() {
+	echo "== rebooting to fastboot"
+	board_root "systemd-run --on-active=2 systemctl reboot --reboot-argument=bootloader >/dev/null && echo requested"
+	local i
+	for i in $(seq 36); do
+		sleep 5
+		fastboot devices 2>/dev/null | grep -q fastboot && break
+	done
+	fastboot devices 2>/dev/null | grep -q fastboot || { echo "no fastboot device after 3 min"; exit 1; }
+	fastboot set_active a && fastboot getvar current-slot && fastboot reboot
 }
 
 if [ $MODE = restore ]; then

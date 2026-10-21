@@ -2,17 +2,18 @@
 
 ## Android (2026-10-21)
 
-The Volta stack runs on LineageOS slot a within 1-2% of Linux, and llama-server
-+ ChatterUI works (LOG 2026-10-21). drm_hwcomposer fix e7a1d91 puts the
-streaming chat's layers on planes (GPU composition -94%, tg +8%) but only runs
-via a tmpfs bind mount until the vendor image is rebuilt and flashed. Next:
-1. Rebuild vendor with e7a1d91 (+ libggml-cpu without dotprod) and flash slot a;
-   (fix pushed: bslette/android_external_drm_hwcomposer-upstream rey-24).
-2. The 12 failed test commits per 300 frames: find which layout Tegra rejects.
-3. In-app tg 16.5 vs 19.6 static: the app's HWUI rendering on the same GPU.
-   Try GPU context priority, or a lighter client (fewer redraws per token).
-4. Short-prompt latency: 32-46 tokens take 1.0-2.8 s (pp512 is 330 t/s).
-5. /metadata is full.
+The Volta stack runs on LineageOS slot a within 1-2% of Linux; llama-server +
+ChatterUI works. drm_hwcomposer fork rey-24 (e7a1d91 colorspace init, d122bc5
+per-layer plane check) keeps a streaming chat on planes (efficiency 0.98).
+Manifest overrides for all forks: stealth .repo/local_manifests/zz-bslette-forks.xml.
+Next:
+1. In-app tg 16.7 vs 18.8 without UI: GPU channel switching with the app's GL
+   context (LOG 2026-10-21 evening). Options: nouveau runlist/TSG priority or
+   timeslice for Volta + NVK global priority HIGH for llama; or a client that
+   redraws less per token.
+2. Short-prompt latency: 30-46 tokens take 1.0-2.8 s (pp512 is 330 t/s); the
+   first request after a server start is 3x slower (warmup).
+3. /metadata is full.
 
 ## Where the gap is (2026-10-20)
 

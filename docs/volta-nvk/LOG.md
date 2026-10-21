@@ -602,3 +602,50 @@ hal_graphics_composer_default_exec), bind it over
 `/apex/com.android.hardware.graphics.composer/bin/hw/...`, then `stop; stop
 vendor.hwcomposer-3.drm_upstream; start ...; start`. Check `/proc/<pid>/exe`.
 Reverts on reboot.
+
+## 2026-10-21 (evening): failed plane tests, the app's share of the GPU
+
+Failed test commits (12 per 300 frames): DRM atomic debug (drm.debug=0x10)
+showed no kernel-side rejection; a temporary log in
+HwcDisplay::TestComposition() showed every failure had one layer mid-fade
+(alpha 0.55-0.99, window open / chat screen transition) that no plane accepts
+(`planes=0000`): the tegra planes have no "alpha" property, so
+DrmPlane::IsValidForLayer() rejects any non-opaque layer, the plan cannot be
+built, and the whole frame fell back to the GPU. Fix d122bc5 (fork rey-24):
+ICompositorDisplay::AnyPlaneSupportsLayer(), used by IsClientLayer(), so such a
+layer alone is client composited. Since composer start incl. app launch,
+transitions and two streamed replies: 2364 frames, 1 failed test, 0
+flattened, efficiency 0.98.
+
+In-app tg gap (Qwen2.5-3B Q4_K_M, 256 tokens):
+
+| Case | tg t/s |
+|---|---|
+| server, no UI, non-streaming / streaming | 18.4-18.9 / 18.4-18.8 |
+| ChatterUI, `-t 6 --poll 50` (default) | 16.4-16.5 |
+| ChatterUI, `-t 2 --poll 0` | 16.7-16.8 |
+| ChatterUI, `-t 1 --poll 0` | 16.7 |
+
+- With all layers on the GPU, llama-server's 5 CPU workers still spin at
+  42-49% each (ggml threadpool polling); `-t 2 --poll 0` frees them, +2% in
+  the app, no change without UI.
+- Streaming (one SSE event per token) costs nothing measurable.
+- The app renders ~24 fps while streaming with ~1 ms GPU per frame (gfxinfo),
+  yet costs ~5 ms per token: the cost is GPU channel switching between NVK
+  compute and the app's GL context, not the drawing. NVK reports only MEDIUM
+  global priority and nouveau has no runlist/TSG priority or timeslice
+  control for Volta, so the real fix (compute channel priority / longer
+  timeslice) is a kernel + NVK project. App side: fewer redraws per token.
+
+Flashed (2026-10-21 15:42 build) to slot a with flash-slota.sh: composer from
+the image is the fixed one (/proc/<pid>/exe a6109679), libggml-cpu 508ed318
+(no dotprod). Streaming chat on the flashed image, 12 s: 354 frames, 0 failed
+tests, 0 flattened, GPU composition 25 M pixels, efficiency 0.97; app tg 16.7.
+
+Getting back to slot a from Linux: `systemctl reboot
+--reboot-argument=bootloader` (6.18's tegra PMC driver sets SCRATCH0 bit 30,
+cboot's fastboot flag) -> cboot fastboot on USB -> `fastboot set_active a;
+fastboot reboot`: Android up 65 s later. Now `flash-slota.sh --reboot`. Do not
+probe PMC SCRATCH_15 (0x0C390418, cboot's boot chain register) from Linux: the
+AON scratch block is firewalled and the access panicked the kernel (CBB SLV
+errors).
