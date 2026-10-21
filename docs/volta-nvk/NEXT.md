@@ -7,7 +7,7 @@ The Volta stack runs on LineageOS slot a within 1-2% of Linux, and llama-server
 streaming chat's layers on planes (GPU composition -94%, tg +8%) but only runs
 via a tmpfs bind mount until the vendor image is rebuilt and flashed. Next:
 1. Rebuild vendor with e7a1d91 (+ libggml-cpu without dotprod) and flash slot a;
-   push the drm_hwcomposer branch to a fork.
+   (fix pushed: bslette/android_external_drm_hwcomposer-upstream rey-24).
 2. The 12 failed test commits per 300 frames: find which layout Tegra rejects.
 3. In-app tg 16.5 vs 19.6 static: the app's HWUI rendering on the same GPU.
    Try GPU context priority, or a lighter client (fewer redraws per token).

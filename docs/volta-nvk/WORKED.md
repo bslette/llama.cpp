@@ -69,7 +69,7 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | Mesa `rey-nouveau-gv11b-24-volta` 08bdef6 | volta-cmat-int8 + Android build commits + c268c68 (L2 maint switch via os_get_option) | Android TinyLlama Q4_0 1016 / 57.5, Q8_0 1002 / 41.3 (Linux 1031 / 58.6, 1011 / 42.1) |
 | kernel `rey-nouveau-gv11b-6.18-v68-l2` ff75efd | uvmm_sysmem_vol on the Android kernel | with cmdline `nouveau.uvmm_sysmem_vol=0` |
 | galen `rey-24` 4c6bc2d + follow-up | NVK cmat + L2 properties, llama.cpp in /system_ext | PPL 26.41 (Linux 26.40) |
-| drm_hwcomposer-upstream e7a1d91 (local branch) | initialize LayerData colorspace; compare unset colorspace as BT.709 | streaming chat: GPU composition 1018 M -> 53 M pixels / 12 s, efficiency 0 -> 0.93, Qwen2.5-3B tg 15.4 -> 16.5 in ChatterUI |
+| drm_hwcomposer `bslette/android_external_drm_hwcomposer-upstream` rey-24 e7a1d91 | initialize LayerData colorspace; compare unset colorspace as BT.709 | streaming chat: GPU composition 1018 M -> 53 M pixels / 12 s, efficiency 0 -> 0.93, Qwen2.5-3B tg 15.4 -> 16.5 in ChatterUI |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)
 
