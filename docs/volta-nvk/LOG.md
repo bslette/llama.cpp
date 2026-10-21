@@ -420,3 +420,24 @@ Conclusions:
   4678 -> 4538 us. 128x256 with 2x4 of 64x64 needs 60 KB shared memory
   (over 48 KB): garbage, dropped.
 - pp512 now: Q4_0 970, Q8_0 956, Q4_K_M 825, IQ4_XS 918 (CUDA 1030 / 1134).
+
+## 2026-10-21 (later): GEMM ablation and epilogue
+
+Ablation of the real `mul_mm_volta_f16` (spec constant, experiments/
+llama-volta-gemm-ablation.diff), 5632x512x2048 Q8_0 op time incl. dequant:
+full 4649 us; no HMMA 3952; no global loads in the K loop 3830; no shared
+staging stores 3736; no output stores 4315; none of HMMA/global/staging 2369
+(fragment LDS + barriers + dequant + epilogue). The parts overlap poorly:
+each alone is 0.7-0.9 ms, together 2.3 ms; HMMA at full rate would be about
+1.7 ms of the 4.6 ms.
+
+- Epilogue via shared memory + vec4 f32 stores (`609ff7c`): 4649 -> 4599 us,
+  pp512 Q4_0 970 -> 976, Q8_0 956 -> 964.
+- The coopMatStore of the f16 accumulators to shared memory was 128 scalar
+  u16 stores per lane (the lane holds 8 consecutive N values, D is M-major).
+  Swapping operand roles (compute D^T: activations as A) made every epilogue
+  access 128-bit (40 STS.128, 64 STG.128) but changed nothing (4606 us):
+  reverted. The epilogue is no longer a cost.
+- HMMA issue order in NAK is fine (4 independent accumulators per k-chunk).
+  245 registers -> 2 workgroups (8 warps) per SM; cuBLAS fits 3 at 168.
+- pp512 now: Q4_0 976, Q8_0 964, Q4_K_M 832, IQ4_XS 923 (CUDA 1030 / 1134).

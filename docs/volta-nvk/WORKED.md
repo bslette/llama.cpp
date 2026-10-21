@@ -22,6 +22,7 @@ All numbers are from Jetson Xavier NX (GV11B) under NVK, TinyLlama-1.1B, unless 
 | `2a404d7` | rope workgroups 8 rows × 32 pairs (was 1 row × 256, mostly idle for 64-dim heads) | ROPE 497 → 165 µs; pp512 Q4_0 929 → 940 |
 | `e7112dc` | rms_norm: 128-invocation variant for many rows, row kept in registers | 471 → 328 µs; pp512 Q4_0 940 → 956 |
 | `2263d43` | Volta GEMM 2×2 subgroups of 64×64 (cuBLAS shape) | pp512 Q4_0 956 → 970, Q8_0 941 → 956 |
+| `609ff7c` | Volta GEMM epilogue through shared memory, vec4 f32 stores | 5632×512×2048 4649 → 4599 µs; pp512 +0.8% |
 | `854e05d` | fuse MUL_MAT(up) + MUL_MAT(gate) + SWIGLU into one MMVQ dispatch (spec const `FUSE_GLU`, push consts `a_offset_x`/`gate_delta`; needs both weights in one buffer, whole blocks apart) | Q4_K_M 42.3 → 43.2, Q5_K_M 36.9 → 37.7, Q4_0 neutral |
 
 Correctness: PPL matches CPU/CUDA (Q4_0 23.84, Q8_0 23.10 wikitext 20x512).

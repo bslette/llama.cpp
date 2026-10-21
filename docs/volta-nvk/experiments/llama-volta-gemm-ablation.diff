@@ -1,0 +1,64 @@
+diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+index a495207..cef8517 100644
+--- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
++++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+@@ -3222,7 +3222,8 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
+     if (device->coopmat_support && device->coopmat_acc_f16_support && device->subgroup_size == 32 &&
+         device->driver_id == vk::DriverId::eMesaNvk && strstr(device->properties.deviceName, " GV1") != nullptr &&
+         !getenv("GGML_VK_DISABLE_VOLTA_GEMM")) {
+-        ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_f16, "matmul_f16_volta", matmul_f16_volta_cm1_len, matmul_f16_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {}, 1, true, true, 32);
++        const uint32_t volta_abl = getenv("GGML_VK_VOLTA_ABL") ? atoi(getenv("GGML_VK_VOLTA_ABL")) : 0;  // EXPERIMENT
++        ggml_vk_create_pipeline(device, device->pipeline_matmul_volta_f16, "matmul_f16_volta", matmul_f16_volta_cm1_len, matmul_f16_volta_cm1_data, "main", 3, 6 * sizeof(uint32_t), {128, 128, 1}, {volta_abl}, 1, true, true, 32);
+         // dequantizing q4_0 inside the GEMM is slower than the separate dequant pass now
+         // (its 18-byte blocks are staged with 16-bit loads); opt-in for experiments
+         if (getenv("GGML_VK_VOLTA_FUSED")) {
+diff --git a/ggml/src/ggml-vulkan/vulkan-shaders/mul_mm_volta_f16.comp b/ggml/src/ggml-vulkan/vulkan-shaders/mul_mm_volta_f16.comp
+index 9617406..e599734 100644
+--- a/ggml/src/ggml-vulkan/vulkan-shaders/mul_mm_volta_f16.comp
++++ b/ggml/src/ggml-vulkan/vulkan-shaders/mul_mm_volta_f16.comp
+@@ -27,6 +27,9 @@
+ #endif
+ #define THREADS (32 * WARPS_M * WARPS_N)
+ layout(local_size_x = THREADS, local_size_y = 1, local_size_z = 1) in;
++// EXPERIMENT ablation: 1 no HMMA, 4 no global loads in the K loop,
++// 8 no shared stores, 16 no output stores (results are wrong with any bit set)
++layout(constant_id = 0) const uint ABL = 0;
+ 
+ #if defined(A_Q4_0)
+ // A read in place as ggml blocks (one 32-weight block per row per K tile) and dequantized to f16
+@@ -125,6 +128,7 @@ void main() {
+             }
+         }
+ #else
++        if ((ABL & 8) == 0) {
+         [[unroll]] for (uint i = 0; i < PA; i++) {
+             const uint o = (lr + RP * i) * PITCH + lc * 8;
+             [[unroll]] for (uint w = 0; w < 4; w++) {
+@@ -139,9 +143,10 @@ void main() {
+                 sb[buf][o + 2 * w] = y.x; sb[buf][o + 2 * w + 1] = y.y;
+             }
+         }
++        }
+ #endif
+         barrier();
+-        if (kt + 1 < ktiles) {
++        if (kt + 1 < ktiles && (ABL & 4) == 0) {
+             const uint kk = (kt + 1) * (BK / 8);
+ #ifdef A_QUANT
+             [[unroll]] for (uint q = 0; q < QP; q++) {
+@@ -172,12 +177,15 @@ void main() {
+             [[unroll]] for (uint j = 0; j < WTN; j++) {
+                 coopMatLoad(fb[j], sb[buf], (wn * 16 * WTN + j * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutColumnMajor);
+             }
++            if ((ABL & 1) == 0 || p.M == 0xffffffffu) {
+             [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
+                 acc[i][j] = coopMatMulAdd(fa[i], fb[j], acc[i][j]);
+             }
++            }
+         }
+         buf ^= 1;
+     }
++    if ((ABL & 16) == 0 || p.M == 0xffffffffu)
+     [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
+         coopMatStore(coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(acc[i][j]), data_d,
+                      (n0 + wn * 16 * WTN + j * 16) * p.stride_d + m0 + wm * 64 + i * 16, p.stride_d,

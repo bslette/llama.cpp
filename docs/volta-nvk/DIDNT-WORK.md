@@ -20,6 +20,7 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | FA row-max reading sfsh as vec4 | no codegen change | NIR already merged the component reads |
 | FA P/V coopmat loads as 64-bit (NAK `e943159` + separate PMat/VMat) | FA 3829 → 3833 µs | the u16 loads were not FA's bottleneck |
 | Volta GEMM 128×256 with 2×4 subgroups of 64×64 | wrong results, 4× slower | 60 KB shared memory > 48 KB default |
+| Volta GEMM with swapped operand roles (D^T) so the epilogue is all 128-bit | 4599 → 4606 µs | epilogue is not a cost after `609ff7c` |
 | Blanket address fold with the L2 on (`NAK_DEBUG=nowrap`) for every shader | q6_K mat-vec +12–15% slower, Q4_1 tg −3.5% | the gain is per shader; apply it only to q4_K/q5_K/iq4_xs |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 

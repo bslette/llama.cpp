@@ -49,8 +49,11 @@ Ranked:
    level now. Left: mask_cache in local memory; FA multi-row tiles slower before.
 4. ~~Warp tile 64x64~~ done (`2263d43`, +1.5%). GEMM is ~2.6 TFLOPS on the big
    matrices vs cuBLAS 5.0; remaining ideas below.
-5. GEMM global side: wider loads for fused q4_0 staging, 3-stage pipeline,
-   STG.128 epilogue via smem. -10..30 ms.
+5. GEMM main loop (ablation in LOG 2026-10-21): fragment LDS, staging STS and
+   HMMA don't overlap. Ideas: fewer registers (245 -> <= 170 for 3
+   workgroups/SM: smaller staging, fragments per A row), fragment double
+   buffering inside the K tile, BK 64 with fewer barriers (needs smem).
+   Epilogue done (`609ff7c`).
 6. Q8_0 fused dequant again with aligned-window loads (34-byte blocks).
    Q8_0 only, ~ -10 ms.
 
