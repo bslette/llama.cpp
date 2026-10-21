@@ -165,16 +165,17 @@ void main() {
 #endif
         }
         [[unroll]] for (uint ks = 0; ks < BK; ks += 16) {
-            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> fa[4];
+            // B fragments for the whole step, A fragments one at a time: fewer live registers
             coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> fb[WTN];
-            [[unroll]] for (uint i = 0; i < 4; i++) {
-                coopMatLoad(fa[i], sa[buf], (wm * 64 + i * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutRowMajor);
-            }
             [[unroll]] for (uint j = 0; j < WTN; j++) {
                 coopMatLoad(fb[j], sb[buf], (wn * 16 * WTN + j * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutColumnMajor);
             }
-            [[unroll]] for (uint i = 0; i < 4; i++) [[unroll]] for (uint j = 0; j < WTN; j++) {
-                acc[i][j] = coopMatMulAdd(fa[i], fb[j], acc[i][j]);
+            [[unroll]] for (uint i = 0; i < 4; i++) {
+                coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> fa;
+                coopMatLoad(fa, sa[buf], (wm * 64 + i * 16) * PITCH + ks, PITCH, gl_CooperativeMatrixLayoutRowMajor);
+                [[unroll]] for (uint j = 0; j < WTN; j++) {
+                    acc[i][j] = coopMatMulAdd(fa, fb[j], acc[i][j]);
+                }
             }
         }
         buf ^= 1;
