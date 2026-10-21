@@ -397,3 +397,26 @@ Conclusions:
 - pp512 now: Q4_0 903 -> 940, Q8_0 865 -> 925, Q4_K_M 757 -> 805,
   IQ4_XS 833 -> 891 (CUDA Q4_0 1030, Q8_0 1134). tg unchanged. MUL_MAT,
   ROPE, ROPE_BACK, FLASH_ATTN_EXT pass; PPL unchanged.
+
+## 2026-10-21: prompt processing, steps 2-4
+
+- rms_norm (`e7112dc`): 128-invocation variant for >= 64 rows, row kept in
+  registers. 2048x512: 471 -> 328 us (cache alone 455; 256 threads 354 but
+  tg -1.3%; 128 threads for all rows tg -2.9%, hence the row-count switch).
+  PPL Q4_0 26.4037 -> 26.4113, Q4_K_M 25.9262 -> 25.8961 (reduction order).
+- FA (step 3): the "128 u16 shared loads" were the P·V coopmat operands, P
+  column-major (A) and V row-major (B); NAK only had the mma.m8n8k4 .row.col
+  fragment layout. Encodings from ptxas sm_72 (L4T CUDA 11.4 on /mnt/l4t):
+  bit 73 = A column-major, bit 74 = B column-major. Mesa `e943159`: alternate
+  fragment layouts for cmat variables that only see column-major A /
+  row-major B loads (grouped across cmat_copy). With P/V in their own matrices
+  in the FA shader (experiments/llama-fa-pmat-vmat-experiment.diff) the u16
+  loads become 36 x b64, FLASH_ATTN_EXT 5332/5332, but FA time unchanged
+  (3833 vs 3829 us): those loads were not FA's bottleneck. FA is at CUDA's
+  level (CUDA tile + combine ~3.8 ms/call). FA keeps a 32-byte local array
+  (mask_cache, loops over gl_WorkGroupSize not fully unrolled); minor.
+- GEMM warp tile (`2263d43`): 2x2 subgroups of 64x64 (cuBLAS h884 shape)
+  instead of 2x4 of 64x32: 252 registers, no spills; 5632x512x2048
+  4678 -> 4538 us. 128x256 with 2x4 of 64x64 needs 60 KB shared memory
+  (over 48 KB): garbage, dropped.
+- pp512 now: Q4_0 970, Q8_0 956, Q4_K_M 825, IQ4_XS 918 (CUDA 1030 / 1134).

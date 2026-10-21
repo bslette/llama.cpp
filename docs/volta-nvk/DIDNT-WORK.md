@@ -17,6 +17,9 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 | q2_K with 8-byte window loads through pointers | 780 → 790 µs | blocks are 4-byte aligned already; realign ALU ate the gain (plain 4-byte loads through pointers: 689) |
 | 64x64-tile, 2-subgroup Volta GEMM for small matrices | k/v proj 344 → 474 µs; everything small: pp512 Q4_0 659 | half the reuse per load; SM balance gain is smaller than that |
 | q4_0 fused dequant in the Volta GEMM after `edb5d1c` | pp512 889 vs 929 unfused | 16-bit loads from 18-byte blocks while staging; opt-in now |
+| FA row-max reading sfsh as vec4 | no codegen change | NIR already merged the component reads |
+| FA P/V coopmat loads as 64-bit (NAK `e943159` + separate PMat/VMat) | FA 3829 → 3833 µs | the u16 loads were not FA's bottleneck |
+| Volta GEMM 128×256 with 2×4 subgroups of 64×64 | wrong results, 4× slower | 60 KB shared memory > 48 KB default |
 | Blanket address fold with the L2 on (`NAK_DEBUG=nowrap`) for every shader | q6_K mat-vec +12–15% slower, Q4_1 tg −3.5% | the gain is per shader; apply it only to q4_K/q5_K/iq4_xs |
 | Hypothesis: `ld.strong.gpu` loads slow MMVQ | wrong | only Mesa's meta copy shader emits them; MMVQ uses `LDG.E.CONSTANT.SYS`, same as CUDA |
 

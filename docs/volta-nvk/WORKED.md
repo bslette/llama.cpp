@@ -20,6 +20,8 @@ All numbers are from Jetson Xavier NX (GV11B) under NVK, TinyLlama-1.1B, unless 
 | `8f35297` | q2_K A_BDA with 4-byte loads; iq1_m scales as one 8-byte load | q2_K 780 → 689 µs, iq1_m 1231 → 963 µs |
 | `edb5d1c` | Volta GEMM stages A and B in separate loops (tile shape parametrized); q4_0 fused dequant opt-in | f16 GEMM −6–8%; pp512 Q4_0 903 → 929, Q8_0 865 → 912 |
 | `2a404d7` | rope workgroups 8 rows × 32 pairs (was 1 row × 256, mostly idle for 64-dim heads) | ROPE 497 → 165 µs; pp512 Q4_0 929 → 940 |
+| `e7112dc` | rms_norm: 128-invocation variant for many rows, row kept in registers | 471 → 328 µs; pp512 Q4_0 940 → 956 |
+| `2263d43` | Volta GEMM 2×2 subgroups of 64×64 (cuBLAS shape) | pp512 Q4_0 956 → 970, Q8_0 941 → 956 |
 | `854e05d` | fuse MUL_MAT(up) + MUL_MAT(gate) + SWIGLU into one MMVQ dispatch (spec const `FUSE_GLU`, push consts `a_offset_x`/`gate_delta`; needs both weights in one buffer, whole blocks apart) | Q4_K_M 42.3 → 43.2, Q5_K_M 36.9 → 37.7, Q4_0 neutral |
 
 Correctness: PPL matches CPU/CUDA (Q4_0 23.84, Q8_0 23.10 wikitext 20x512).
@@ -43,6 +45,7 @@ test-backend-ops: full MUL_MAT 2929/0, MUL_MAT_ID 945/0, MUL_MAT_VEC_FUSION 1265
 | `e71e443` | model Volta HMMA/IMMA results as 24 cycles | neutral, correct model |
 | `972938f` | L2 maintenance around every exec when nouveau caches sysmem (uvmm_sysmem_vol=0); lets Tegra use its GPU L2 | pp +12–13%, tg +11% (Q4_0 879/57.9, Q8_0 868/42.0) |
 | `df97444` | `NAK_DEBUG=nowrap`: fold constant buffer offsets into LDG/STG immediates, assuming 32-bit offsets don't wrap (opt-in) | tg Q5_K_M +19.6%, Q4_K_M +11.3%, IQ4_XS +4.8%; q6_K −12–15%, Q4_1 −3.5% |
+| `e943159` | Volta HMMA.884 column-major A / row-major B fragments (bits 73/74), 64-bit loads for such cmat variables | FA P loads u16 → b64; no FA speedup |
 | `b1f2df0` | pre-RA scheduler: constant loads are not side effects; global ld latency 200 | Q6_K lm_head 2.10 → 1.58 ms, about +3% tg |
 
 Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth

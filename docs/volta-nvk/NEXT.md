@@ -45,13 +45,10 @@ Ranked:
    loops gave -6-8% on every GEMM (`edb5d1c`).
 2. rope done (`2a404d7`, 497 -> 165 µs). rms_norm (470 µs/call vs CUDA 225):
    smaller workgroups, row kept in registers. ~ -10 ms.
-3. Coopmat FA: vectorize the 128 u16 shared loads, then remeasure. -10..20 ms.
-4. Measure first: ablation on the real `mul_mm_volta_f16` (not gemmbench)
-   and an LDS bank-conflict probe. If conflict-bound, swizzle the smem layout.
-   Then warp tile 64x64 with 128-thread workgroups (cuBLAS shape): a third
-   fewer fragment LDS per HMMA, more independent HMMAs per warp. Prototype in
-   gemmbench (3.13 -> >4 TFLOPS), watch NAK RA (<= 168 regs, no spills).
-   Up to -100 ms; ~12% GEMM speedup is enough to pass CUDA.
+3. ~~Coopmat FA u16 loads~~ done in NAK (`e943159`), no gain; FA is at CUDA's
+   level now. Left: mask_cache in local memory; FA multi-row tiles slower before.
+4. ~~Warp tile 64x64~~ done (`2263d43`, +1.5%). GEMM is ~2.6 TFLOPS on the big
+   matrices vs cuBLAS 5.0; remaining ideas below.
 5. GEMM global side: wider loads for fused q4_0 staging, 3-stage pipeline,
    STG.128 epilogue via smem. -10..30 ms.
 6. Q8_0 fused dequant again with aligned-window loads (34-byte blocks).
