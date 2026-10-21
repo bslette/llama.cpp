@@ -22,7 +22,9 @@ generation and launch shape, not exotic instructions.
 
 ## Prompt processing plan (2026-10-20)
 
-Status 2026-10-21: Q4_0 pp512 1030 = CUDA; Q8_0 1013 vs 1134.
+Status 2026-10-21: Q4_0 pp512 1030 = CUDA; Q8_0 1011 vs 1134. The generic
+parts (rope, rms_norm) are validated on RDNA1/3, Ada (NVK and NVIDIA driver),
+Iris Xe and UHD 770 (LOG 2026-10-21 night) and listed as ready in UPSTREAM.md.
 
 Per pp512 eval, Q4_0, same clocks: NVK 580 ms vs CUDA 497 ms (1030 t/s).
 NVK from GGML_VK_PERF_LOGGER (`/root/prof/pp-now-Q4_0.log`), CUDA from

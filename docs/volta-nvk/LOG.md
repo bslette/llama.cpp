@@ -446,3 +446,69 @@ each alone is 0.7-0.9 ms, together 2.3 ms; HMMA at full rate would be about
   overlaps the A loads with the previous HMMAs. 5632x512x2048 4599 -> 4271 us.
   **pp512 Q4_0 976 -> 1030 = CUDA (1030)**, Q8_0 964 -> 1013 (CUDA 1134),
   Q4_K_M 832 -> 869, IQ4_XS 923 -> 965. PPL unchanged.
+
+## 2026-10-21 (night): cross-GPU check of the pp round, fixes
+
+Mesa: forked mesa/mesa as gitlab.freedesktop.org/bslette/mesa (glab on
+stealth) and pushed `nak-idp4a-imm` (IDP.4A immediate fix + hw test). No MR yet.
+
+New test GPUs: Intel Iris Xe (aimini, ADL GT2, Mesa 26.0.8), Intel UHD 770
+(bazzite, ADL-S GT1, Mesa 26.2.4), RTX 4060 Laptop on NVK (bazzite, nouveau
+with AD107 GSP 570.144 firmware staged in /var, Mesa main-fixed build). aimini's
+RTX 3050 is on the NVIDIA driver now. Script: experiments/xval/xval-pp.sh
+(A/B trees), summaries with brief.sh.
+
+What the cross-GPU run of the pp round (`d4418c8`) found and what was fixed:
+
+- **rms_norm wrong on Intel** (UHD 770: RMS_NORM 23/53, RMS_NORM_MUL_ADD 8/37;
+  upstream b76b133 passes). The subgroupAdd reduction (`3e3e3d8`, in every
+  tree since base) ran at whatever SIMD width ANV picked. Summing all subgroup
+  partials (`c07d396`) was not enough; requesting full subgroups of
+  device->subgroup_size for the rms_norm pipelines (`3a76e85`) fixes it
+  (53/53, 37/37 on UHD 770 and Iris Xe). No change on Volta.
+- **rope 8x32 workgroups** (`2a404d7`) were 1.9-2x faster on most shapes on
+  every GPU but up to 3-5x slower on RDNA1/3 for 128-dim views and 256/512-wide
+  rows. Not coalescing (remapping lanes onto one row, `7a97fe3`, changed
+  nothing on AMD): the rows were split into 64-element column slices across
+  workgroups in grid y, so concurrent workgroups hit the same slice of many
+  rows (memory channel camping). `cdaf6ad`: workgroups cover 8 whole rows,
+  32 lanes looping (Volta: up to -26% more). Then 512-wide rows were still
+  1.6-1.8x slower on AMD (8 passes per lane); one pair per lane for every
+  width was 40% slower on Volta. `8669818`: at most two pairs per lane
+  (32 lanes up to 128-wide rows, then 64/128/256), the host dispatches the
+  matching rows per workgroup. Volta +3.5% vs `cdaf6ad`, AMD wide rows back
+  to 1.03-1.11x of the old shader.
+- **rms_norm rows variant** (`e7112dc`): pp rms_norm -31% on NVK Ada, -11%
+  Iris Xe (-37% before the subgroup pin), -74% UHD 770, but +6-13% on RADV and
+  the NVIDIA driver: gated off
+  there (`3929f28`). The register cache of the row in the 512-wide shader
+  made RDNA3 20% slower (16 -> 19 us) and did nothing on Volta: now only in
+  the rows variant (`6e4b61f`).
+- nouveau on the RTX 4060 runtime-suspended between runs; after the resume
+  every job timed out (head too). Holding the render node open for the whole
+  run (`exec 9</dev/dri/...render`) avoids it.
+
+Final (`6e4b61f`) vs the last validated head (`a8f39f5`), pp512 TinyLlama
+-fa 1; all ROPE / RMS_NORM / RMS_NORM_MUL_ADD tests pass on all six GPUs:
+
+| GPU | rope op (us) | rms_norm op (us) | pp512 Q4_0 | Q8_0 | Q4_K_M | IQ4_XS |
+|---|---|---|---|---|---|---|
+| RX 7800 XT (RADV) | 35.9 -> 14.7 | 15.9 -> 16.0 | +1.2% | +1.0% | +1.0% | +0.8% |
+| RX 5700 XT (RADV) | 74.2 -> 7.9 | 57.3 -> 48.9 | +1.0% | +0.8% | +0.9% | +1.1% |
+| RTX 3050 (NVIDIA driver) | 98.4 -> 55.6 | 57.7 -> 56.9 | +0.9% | +1.2% | +0.8% | +1.6% |
+| RTX 4060 (NVK) | 64.4 -> 22.9 | 40.5 -> 28.0 | +1.8% | +1.2% | +1.4% | +1.4% |
+| Iris Xe (ANV) | 424 -> 115 | 157 -> 140 | +1.4% | +0.9% | +1.3% | +1.3% |
+| UHD 770 (ANV) | 1169 -> 189 | 799 -> 210 | +4.1% | +2.7% | +3.3% | +3.0% |
+
+tg128 unchanged everywhere. ROPE perf cases (60): geomean 0.32x (UHD 770) to
+0.71x (RX 5700 XT) of head's time; the only case slower everywhere is the
+2-row vision rope (80x16x2, about 1.5 us, launch-bound), 1.2-1.35x.
+Xavier: pp512 1031 / 1011, tg128 58.6 / 42.1 (Q4_0 / Q8_0), unchanged.
+
+The MMVQ round (`base` 7a5733b vs `head` a8f39f5) on the new GPUs: all
+MUL_MAT / MUL_MAT_ID / MUL_MAT_VEC_FUSION tests pass (Iris Xe, UHD 770, RTX
+4060 NVK). Iris Xe q4_K/q5_K mat-vec -4..-9%, neutral elsewhere; UHD 770
+neutral. RTX 4060 NVK: q4_K n=4 299 -> 232 us, q5_K n=4 359 -> 275, iq4_xs
+n=4 400 -> 226, q2_K n=4 238 -> 151 (tg at 230 t/s is not GPU bound there).
+The opt-in BDA knobs (exp) help Intel tg (UHD 770 Q4_K_M 28.2 -> 36.4,
+Q5_K_M 25.1 -> 31.6; Iris Xe +2-5%) through q6_K/q3_K MMVQ.

@@ -24,6 +24,9 @@ All numbers are from Jetson Xavier NX (GV11B) under NVK, TinyLlama-1.1B, unless 
 | `2263d43` | Volta GEMM 2×2 subgroups of 64×64 (cuBLAS shape) | pp512 Q4_0 956 → 970, Q8_0 941 → 956 |
 | `609ff7c` | Volta GEMM epilogue through shared memory, vec4 f32 stores | 5632×512×2048 4649 → 4599 µs; pp512 +0.8% |
 | `d4418c8` | Volta GEMM: B fragments per K step, A fragments one at a time before their HMMAs | 4599 → 4271 µs; pp512 Q4_0 976 → 1030 (= CUDA), Q8_0 964 → 1013 |
+| `c07d396` + `3a76e85` | rms_norm reduction: sum all subgroup partials; pipelines request full subgroups of the default size | Intel UHD 770 RMS_NORM 23/53 → 53/53 (regression since `3e3e3d8`); no change on Volta |
+| `cdaf6ad` + `8669818` | rope workgroups cover whole rows, at most two pairs per invocation | fixes the AMD wide-row regression of `2a404d7`; pp rope op 1.4–9x faster on all six test GPUs |
+| `3929f28` + `6e4b61f` | rms_norm rows variant off on RADV and the NVIDIA driver; row register cache only in that variant | pp rms_norm −31% NVK Ada, −11% Iris Xe, −74% UHD 770; neutral on RADV / NVIDIA driver |
 | `854e05d` | fuse MUL_MAT(up) + MUL_MAT(gate) + SWIGLU into one MMVQ dispatch (spec const `FUSE_GLU`, push consts `a_offset_x`/`gate_delta`; needs both weights in one buffer, whole blocks apart) | Q4_K_M 42.3 → 43.2, Q5_K_M 36.9 → 37.7, Q4_0 neutral |
 
 Correctness: PPL matches CPU/CUDA (Q4_0 23.84, Q8_0 23.10 wikitext 20x512).

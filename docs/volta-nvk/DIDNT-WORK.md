@@ -69,3 +69,18 @@ Keep every failed attempt here with the reason, so it isn't repeated.
   Filter mat-vec with `-p 'type_b=f32,m=[0-9]+,n=[1-8],'` (~2 min).
 - Root `git push` on nx-linux hangs at a username prompt. Use the gh
   credential helper (see SETUP.md).
+
+## Cross-GPU (2026-10-21)
+
+- rope: remapping lanes so each run of 32 invocations covers 32 contiguous pairs
+  of one row (`7a97fe3`) did not fix the AMD wide-row slowdown of the 8x32
+  workgroups; the cause was column slices across workgroups (channel camping),
+  fixed by whole-row workgroups.
+- rope with one pair per invocation for every row width (up to 256 lanes per
+  row): 40% slower on Volta (128-wide rows +76%); Volta wants two pairs each.
+- rms_norm: summing all subgroup partials in a loop was not enough on Intel;
+  the pipelines also need a fixed (full) subgroup size.
+- rms_norm: pinning the subgroup size was not what made RDNA3 slower (19.3 vs
+  19.3 us with the pin Intel-only); the register cache of the row was.
+- nouveau on an Ada laptop GPU: after runtime suspend/resume every job timed
+  out. Keep a DRM client open (render node fd) for the whole benchmark.

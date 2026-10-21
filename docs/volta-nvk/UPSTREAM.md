@@ -5,12 +5,13 @@ splitting or more testing first; **report** = file an issue, no fix yet.
 
 ## Mesa (gitlab.freedesktop.org/mesa/mesa)
 
-Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
-`glab auth login --hostname gitlab.freedesktop.org`, fork mesa/mesa, and push.
+Fork: https://gitlab.freedesktop.org/bslette/mesa (created 2026-10-21 with glab
+on stealth, logged in as bslette). Branch `nak-idp4a-imm` is pushed there; no
+merge request opened yet.
 
 | Issue | Fix | Status |
 |---|---|---|
-| NAK encodes IDP.4A with an immediate source (opcode 0x826). No such form exists, so it traps with ILLEGAL_INSTR_ENCODING on SM72 and nvdisasm rejects it on SM72/75/86. Hit by llama.cpp iq1_m `dp4a(x, 0x01010101)` | `6656192`; on main as stealth `nak-idp4a-imm` (2 commits incl. hw test) | **ready** |
+| NAK encodes IDP.4A with an immediate source (opcode 0x826). No such form exists, so it traps with ILLEGAL_INSTR_ENCODING on SM72 and nvdisasm rejects it on SM72/75/86. Hit by llama.cpp iq1_m `dp4a(x, 0x01010101)` | `6656192`; on main as `nak-idp4a-imm` (2 commits incl. hw test), pushed to the fdo fork | **ready**: open the MR |
 | NAK puts only 1 stall cycle after BRA/BSYNC/EXIT/CALL/RET/BAR on Volta, where ptxas always uses ≥5 (≥4 after WARPSYNC). One warp occasionally never finishes, giving a job timeout (6/30 runs of k=129 permuted mat-vec) | `7ebf5a5` | **ready** (rebase onto main) |
 | NAK pre-RA scheduler chains read-only (`MemOrder::Constant`) loads with other memory ops, and costs global loads at 32 cycles | `b1f2df0` | **needs work**: measure on Turing+ too; the latency value is a heuristic |
 | NAK RA: loop-header phis of vector values (HMMA accumulators) don't see later-block vector uses, so they get misaligned and copied every iteration | `6e44b0e` | **needs work**: rebase, run shader-db |
@@ -27,7 +28,9 @@ Blocked on fork/MR permission for the gitlab.freedesktop.org account. Then run
 |---|---|---|
 | test-backend-ops had no whole-tile cases for most quant types, so a broken `dequant_q5_0` went undetected | part of `7503f0d` | **needs work**: split out as a tests-only PR |
 | Vulkan dequant shaders store f16 2 bytes at a time, 64 bytes apart (uncoalesced) | part of `7503f0d` | **needs work**: split out; helps all GPUs, needs measurements off Volta |
-| rms_norm smem tree reduction (9 barriers) | `3e3e3d8` | **ready**: needs numbers on another GPU |
+| rms_norm smem tree reduction (9 barriers) | `3e3e3d8` + `c07d396` + `3a76e85` | **ready**: as committed `3e3e3d8` broke Intel (ANV picks the SIMD width); with full subgroups of a fixed size it passes on all six test GPUs. Send the three together |
+| rope 8 rows per workgroup, up to two pairs per invocation (was one row per 512-invocation workgroup, mostly idle for 64/128-dim heads) | `2a404d7` + `cdaf6ad` + `8669818` | **ready**: pp rope op 1.4–9x faster on RDNA1/3, Ada (NVK + NVIDIA driver), Iris Xe, UHD 770, Volta; all ROPE tests pass |
+| rms_norm 128-invocation variant for many rows | `e7112dc` + `3929f28` + `6e4b61f` | **ready, gated**: faster on NVK and Intel, slower on RADV and the NVIDIA driver |
 | MMVQ per-workgroup overhead on small K: multiple subgroups per WG on separate rows, no smem | `ad1c0b8` (gated to NVK GV1xx) | **needs work**: try on other vendors before widening the gate |
 | MMVQ gate/up/SWIGLU fusion (CUDA has it, Vulkan didn't) | `854e05d` | **needs work**: only the NO_SHMEM path; non-NVK paths and MUL_MAT_ID not covered |
 | CUDA backend: `volta_mma_available(cc)` requires `ggml_cuda_highest_compiled_arch(cc) == 700`. An sm_72 (Xavier) build reports 720, so Xavier never gets the MMA flash-attention kernel and uses `flash_attn_tile` (no tensor cores) even for pp512. Confirmed in the nsys profile | none yet: test `>= VOLTA && < TURING` on the board | **report** |

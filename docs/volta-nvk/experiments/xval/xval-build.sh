@@ -7,7 +7,7 @@ apt-get update -qq >/dev/null
 apt-get install -y -qq build-essential cmake ninja-build glslc libvulkan-dev spirv-headers git python3 >/dev/null
 G=/src/sdk/1.4.363.0/x86_64/bin/glslc
 $G --version | head -1
-for t in base head exp; do
+for t in ${TREES:-base head exp}; do
   cd /src/$t
   rm -rf build-xval
   cmake -G Ninja -B build-xval -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_SERVER=OFF \
