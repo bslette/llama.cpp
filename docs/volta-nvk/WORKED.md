@@ -71,6 +71,7 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | galen `rey-24` 4c6bc2d + follow-up | NVK cmat + L2 properties, llama.cpp in /system_ext | PPL 26.41 (Linux 26.40) |
 | drm_hwcomposer `bslette/android_external_drm_hwcomposer-upstream` rey-24 e7a1d91 | initialize LayerData colorspace; compare unset colorspace as BT.709 | streaming chat: GPU composition 1018 M -> 53 M pixels / 12 s, efficiency 0 -> 0.93, Qwen2.5-3B tg 15.4 -> 16.5 in ChatterUI |
 | drm_hwcomposer fork rey-24 d122bc5 | client-compose only the layers no plane takes (tegra planes have no alpha property) | failed plane tests 12/300 frames -> 1/2364; efficiency 0.98 |
+| kernel `rey-nouveau-gv11b-6.18-v68-l2` c9fa4e8 | tegra: imported dma-bufs share the exporter's reservation object, so commits wait for the GPU's implicit write fence | no half-rendered app frames on planes (ChatterUI drawer flash gone) |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)
 

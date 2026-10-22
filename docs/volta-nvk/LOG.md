@@ -676,3 +676,28 @@ Qwen2.5-3B Q4_K_M, llama-server -t 2 --poll 0, 256-token replies:
 | server, no UI | 18.4-18.9 | - |
 
 250 ms + reduce motion closes the whole in-app gap.
+
+## 2026-10-21 (night): text flashing through the ChatterUI drawer
+
+Report: opening the main menu (drawer) and expanding Data Sources flashed the
+chat text behind it in front of the drawer. Drawer and chat are one app layer
+(one buffer), so this is not plane z-order: the display was scanning out a
+frame the GPU had not finished (the chat is drawn before the drawer covers it).
+It only became visible once drm_hwcomposer put app layers on planes.
+
+Cause: minigbm allocates every buffer on nouveau (card1) and tegra-drm (card0)
+imports it. Mesa's nvc0 GL driver has no native fence fds, so apps queue
+buffers with acquire fence -1 and implicit sync is the only sync. Tegra's
+tegra_bo_import() gave imported objects their own empty reservation object,
+so drm_gem_plane_helper_prepare_fb() found no fences and the commit never
+waited for the render. GPU composition was safe because nouveau syncs
+implicitly with itself.
+
+Fix: kernel c9fa4e8 (`rey-nouveau-gv11b-6.18-v68-l2`) sets
+`bo->gem.resv = buf->resv` on import, as drm_gem_prime_import_dev() does.
+Flashed to slot a (build 672 s, backup /var/tmp/slota-backup-20261021-204245
+on slot b). After: all four layers DEVICE, drawer + Data Sources renders
+correctly, app GPU time ~1 ms/frame, no tegra/drm errors.
+
+flash-slota.sh: the stage cleanup ran after `--reboot` and failed (exit 255,
+board gone); it now runs before the reboot.

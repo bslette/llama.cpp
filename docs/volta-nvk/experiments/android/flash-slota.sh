@@ -89,9 +89,12 @@ while read -r sum img; do
 done < SHA256SUMS
 sync'
 
+# finish DIR [CLEANUP]: write DIR's images, run CLEANUP on the board, then reboot to
+# slot a if asked (after the reboot the board is no longer reachable over ssh).
 finish() {
 	local dir=$1
 	board_root "bash $dir/write.sh"
+	[ -z "${2:-}" ] || board_root "$2"
 	[ $REBOOT = 1 ] && boot_slot_a
 	return 0
 }
@@ -204,6 +207,5 @@ ssh "$BUILD_HOST" "tar -C $HSTAGE -cf - SHA256SUMS super.img $(for p in $PHYS; d
 	ssh "$BOARD" "tar -C $BSTAGE -xf - && cd $BSTAGE && sha256sum -c --quiet SHA256SUMS && echo copy ok"
 printf '%s\n' "$WRITE_SH" | ssh "$BOARD" "cat > $BSTAGE/write.sh"
 echo "== writing slot a"
-finish "$BSTAGE"
-board_root "rm -rf $BSTAGE"
+finish "$BSTAGE" "rm -rf $BSTAGE"
 echo "slot a written$([ $BACKUP = 1 ] && echo "; backup in $BOARD:$BBACK")"
