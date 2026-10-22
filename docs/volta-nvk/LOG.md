@@ -799,3 +799,25 @@ mount + framework restart, not yet flashed).
 NVDEC from Android: the stage 1 tool built with the NDK runs unprivileged
 (renderD128 = tegra-drm, 0666, gpu_device) and decodes the 720p clip
 bit-exact (60/60).
+
+## 2026-10-22 (night): NVDEC stage 2, Codec2 component in the image
+
+galen 39eccc0 `codec2/`: `c2.rey.avc.decoder` in
+android.hardware.media.c2-default-service (details in experiments/nvdec/README).
+Flashed to slot a (backup slota-backup-20261021-235753). Codec list shows it at
+rank 128; Paramount+ creates it for its 1080p24 previews (media.metrics: 73
+frames, flush-count 1, resolution-change 1, no errors; latency avg 383 ms, the
+reorder hold is conservative). No codec warnings in logcat.
+
+Paramount+ artwork corruption: unchanged with the hardware decoder, so not the
+video path. The "Trending Shows" poster rows are clean; only the hero carousel
+(and its blurred backdrop behind the status bar) is hit. 8x4-pixel black blocks
+= one warp's 32 fragments, so the working theory is an nvc0 (nv50_ir GV100)
+shader codegen problem in the heavier Skia shaders the hero uses. Large
+glTexImage/glTexSubImage uploads (up to 2400x1350, banded too) are exact.
+NV50_PROG_OPTIMIZE is debug-build only and NV50_PROG_SCHED=false emits no
+stalls at all, so neither is an A/B. Next: capture the hero frame as an SKP
+(debug.hwui.capture_skp_enabled) and replay it to find the shader.
+
+Also in the image: Mesa 26dc8ba native fence fds (EGL_ANDROID_native_fence_sync).
+flash-slota.sh --reboot now exits 0 (cleanup before the reboot).

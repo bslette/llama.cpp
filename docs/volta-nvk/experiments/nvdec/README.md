@@ -29,3 +29,24 @@ What it took (each one hung or garbled the decode):
 - Output must be `tileFormat = 0` (TBL, Tegra block linear: 64 B x 8 GOBs of 16Bx2
   sectors, blocks of 2 GOBs with `gob_height = 0`); KBL and Tile16x16 are ignored.
 - Reference: Mikko Perttunen's github.com/cyndis/vaapi-tegra-driver (2021).
+
+## Stage 2: Android Codec2 component (2026-10-22)
+
+`h264dec.c/h`: the decoder as a library (no exit paths, SPS cropping, VUI
+reorder depth, callback per picture in decode order with POC/period), plus
+`h264dec_vic_copy()`: VIC 4.2 (host1x class 0x5d, methods at C5B6 offsets,
+ConfigStruct from libdrm `tests/tegra/vic42.h`) converts the TBL surface into
+a pitch-linear NV12 dma-buf (gralloc buffer imported with PRIME into a VIC
+channel on the same fd). Slot: Y8_U8V8_N420, BLK_KIND_GENERIC_16Bx2,
+SlotBlkHeight 1, CacheWidth 32Bx8; output BLK_KIND_PITCH, chroma via
+SET_OUTPUT_SURFACE_CHROMA_U_OFFSET (0x724). Bit-exact through real
+AHardwareBuffers (320x240 IPB, 720p, 1080p with cropping).
+`h264dec_cli in.h264 out.yuv [node [vic]]` exercises both paths.
+
+CPU copy-out is the fallback only: tegra-drm maps surfaces write-combined and
+uncached reads of freshly decoded frames run at ~145 MB/s (10 ms per 720p).
+
+The component (`c2.rey.avc.decoder`, galen `codec2/`, commit 39eccc0) runs in
+`android.hardware.media.c2-default-service` (AIDL IComponentStore/default,
+mediacodec domain); rank 128 ahead of c2.android.* (0x200); its
+media_codecs_c2.xml lives on odm.
