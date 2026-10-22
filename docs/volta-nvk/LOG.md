@@ -701,3 +701,27 @@ correctly, app GPU time ~1 ms/frame, no tegra/drm errors.
 
 flash-slota.sh: the stage cleanup ran after `--reboot` and failed (exit 255,
 board gone); it now runs before the reboot.
+
+## 2026-10-21 (night): Paramount+ crash, YUV EGL images on nvc0
+
+Paramount+ (com.cbs.app) aborted ~5 s after launch in hwui
+(AutoBackendTextureRelease "Invalid GrBackendTexture 1920x1080") when its
+ExoPlayer TextureView got the first frame from c2.android.avc.decoder (no
+hardware codecs on this build): `skia: Could not create EGL image`.
+
+Test binaries (scratchpad ahbegl.c / dmabufyuv.c, NDK r27c): RGBA
+AHardwareBuffers import, YCbCr_420_888 and YV12 fail; EGL_LINUX_DMA_BUF_EXT
+R8 ok, YVU420/NV12 EGL_BAD_ALLOC. Cause: nouveau_screen_bo_from_handle()
+rejects any non-zero winsys offset, so no chroma plane can be imported, even
+through the DRI frontend's per-plane YUV lowering.
+
+Fix: Mesa c0e2314 (`rey-nouveau-gv11b-24-volta`): nv50_miptree_from_handle
+places the miptree at the offset like a sub-allocated miptree (base.offset,
+address = bo + offset); get_handle reports it. All YUV imports ok; with the
+library bind-mounted (tmpfs + same_process_hal_file, framework restarted)
+Paramount+ runs. Full build with it started.
+
+Hardware decode: the board binds tegra-nvdec/nvjpg/vic (upstream host1x
+channel UAPI, firmware only). Upstream Mesa main (2c16073) has NVK Vulkan
+Video H.264 decode on NVIDIA's published nvdec_drv.h + clc5b0.h; the L4T
+R35 multimedia stack (oldcrustylx ~/nvidia) can serve as a reference trace.
