@@ -752,3 +752,18 @@ Open: black dash corruption on Paramount+ artwork tiles (not video: no codec
 running). CPU-written YV12/RGBA sampling and the hwui hardware-bitmap upload
 path (glTexSubImage2D into an EGLImage, fence, second context) are exact in
 isolation (scratchpad ahbsample.c, hwbitmap.c).
+
+## 2026-10-21 (late night): NVDEC stage 1, bit-exact H.264 on the upstream kernel
+
+`experiments/nvdec/`: standalone decoder on slot b (Linux 6.18.21-nx+) through
+the upstream tegra-drm channel UAPI and NVIDIA's published nvdec_drv.h. Both NVDEC
+instances bind (15480000 class 0xf0, 15140000 class 0xf5), firmware is L4T's
+nvhost_nvdec040_ns.fw as nvidia/tegra194/nvdec.bin. Bit-exact vs ffmpeg on
+I-only CAVLC, I/P CAVLC, I/P/B CABAC 320x240 and 720p High with B-pyramid;
+1.7 ms per 720p frame. Fixes needed: syncpoint cond at bit 10, EXECUTE with
+AWAKEN, TBL output (see README). NVDEC1 (0xf5) stayed wedged after an early
+malformed job (cond at bit 8) until reboot.
+
+Next (stage 2): Android Codec2 component: NVDEC into TBL surfaces, VIC (or CPU)
+to pitch-linear NV12 gralloc buffers (minigbm/nouveau dma-bufs imported into
+tegra-drm), then HEVC/VP9 (nvdec_drv.h has the structs).
