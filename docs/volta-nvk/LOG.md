@@ -835,3 +835,44 @@ in a flashed image.
 Paramount+ live TV / on-demand spin forever: the image has no Widevine HAL
 (only ClearKey), and protected streams need it. Previews are clear content.
 Deferred by the user ("will do drm later").
+
+## 2026-10-22 (afternoon): Paramount+ hero corruption fixed (PIXLD wrote P0)
+
+The 8x4-pixel black blocks on the Paramount+ hero carousel were a codegen
+bug in nvc0's Volta encoder. Fix: Mesa 06c81b9 (`rey-nouveau-gv11b-24-volta`).
+
+- Blocks are whole warps (8x4, screen-aligned, near-black with Skia dither
+  left in), visible on the panel too (layer scanned out on a plane), so in
+  the app's own buffer.
+- Not the texture data cache: invalidating all lines instead of one TIC
+  (nvc0 uses TEX_CACHE_CTL ONE by TIC id on Kepler+) changed nothing.
+- A/B with temporary property switches in the GV100 emitter (read through
+  os_get_option, so `vendor.mesa.nv50.prog.sched.*` set as root reach apps;
+  `debug.*` props win over `vendor.*`, and the app's
+  /data/user_de/0/<pkg>/cache/com.android.opengl.shaders_cache must be
+  deleted or nvc0's disk cache hands back the old binaries):
+  wait on all six scoreboards at every instruction fixed it; max stall did
+  not; no-reuse did not; waits only on texture ops did not, only on the
+  COMPARE class did; only in the two ~700-instruction shaders; only at
+  instructions 8/9 of the first block; only scoreboard 4, which belongs to
+  a PIXLD.
+- The shader is Skia's generic blend (switch over the blend mode) with a dst
+  read: `PIXLD.MY_INDEX r4` (sample index for the TXF), `SET p0 = r0 ==
+  0xffff`, `SELP r0 = p0 ? ...`, `TXF`. Bits 81..83 of PIXLD are a
+  predicate destination; NAK sets them to PT, nvc0 left 0, so PIXLD also
+  wrote P0, asynchronously. When it lands after the SET the SELP picks
+  the wrong coordinate and the TXF reads the wrong texel for the warp.
+  IMAD had the same unset field (fixed too). Upstream Mesa has both.
+- A register-hazard checker over the scheduled code (in-block RaW/WaR/WaW
+  against the barrier bits, waits at EXIT) found nothing, which is what
+  pointed at a write the IR does not know about.
+
+Result: 0 black cells (from ~1400) cold and warm cache, blurred backdrop
+clean. Debug switches reverted; the commit is only the two encoder lines.
+
+Flashed (build 13:32, 264 s) to slot a with flash-slota.sh --reboot (backup
+nx-linux:/var/tmp/slota-backup-20261022-133353). On the flashed image, no
+bind mounts: libgallium_dri c86bb756 (06c81b9), Paramount+ hero 0 black
+cells; codec list has c2.rey.avc.decoder and c2.rey.hevc.decoder; MediaCodec
+h5_1080p (HEVC 1080p, open GOP) 60/60, h11_cracut (CRA start) 60/60 and t5
+(H.264 1080p High) 90/90 bit-exact.

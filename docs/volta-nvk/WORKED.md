@@ -76,6 +76,7 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | galen rey-24 ab80de7 + partner_gms fork rey-24 1361bd7 | microG (GmsCore, FakeStore, GsfProxy) through LineageOS's built-in microG signature spoofing | Play Services location API for apps |
 | galen rey-24 39eccc0 | Codec2 `c2.rey.avc.decoder`: H.264 on NVDEC (upstream tegra-drm channel UAPI), VIC writes the NV12 gralloc buffer | bit-exact vs ffmpeg up to 1080p High; Paramount+ previews use it |
 | galen rey-24 e291f30 | `c2.rey.hevc.decoder`: H.265 Main on NVDEC; component generalized (C2NvdecDec) | 11 streams bit-exact (tiles, WPP, slices, scaling lists, open GOP, CRA start); MediaCodec picks it for video/hevc, bit-exact; ~7 ms per 1080p picture |
+| Mesa `rey-nouveau-gv11b-24-volta` 06c81b9 | nvc0 GV100: PIXLD and IMAD encode PT as their predicate destination (bits 81..83 were 0 = P0) | Paramount+ hero 8x4 black blocks gone (Skia dst-read blend shader) |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)
 
