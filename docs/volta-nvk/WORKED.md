@@ -74,6 +74,8 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | kernel `rey-nouveau-gv11b-6.18-v68-l2` c9fa4e8 | tegra: imported dma-bufs share the exporter's reservation object, so commits wait for the GPU's implicit write fence | no half-rendered app frames on planes (ChatterUI drawer flash gone) |
 | Mesa `rey-nouveau-gv11b-24-volta` c0e2314 | nouveau imports dma-buf planes at an offset (multi-planar YUV EGLImages) | YV12/YCbCr_420_888/NV12 import; Paramount+ no longer aborts in hwui |
 | galen rey-24 ab80de7 + partner_gms fork rey-24 1361bd7 | microG (GmsCore, FakeStore, GsfProxy) through LineageOS's built-in microG signature spoofing | Play Services location API for apps |
+| galen rey-24 39eccc0 | Codec2 `c2.rey.avc.decoder`: H.264 on NVDEC (upstream tegra-drm channel UAPI), VIC writes the NV12 gralloc buffer | bit-exact vs ffmpeg up to 1080p High; Paramount+ previews use it |
+| galen rey-24 e291f30 | `c2.rey.hevc.decoder`: H.265 Main on NVDEC; component generalized (C2NvdecDec) | 11 streams bit-exact (tiles, WPP, slices, scaling lists, open GOP, CRA start); MediaCodec picks it for video/hevc, bit-exact; ~7 ms per 1080p picture |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)
 

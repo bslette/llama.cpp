@@ -821,3 +821,17 @@ stalls at all, so neither is an A/B. Next: capture the hero frame as an SKP
 
 Also in the image: Mesa 26dc8ba native fence fds (EGL_ANDROID_native_fence_sync).
 flash-slota.sh --reboot now exits 0 (cleanup before the reboot).
+
+## 2026-10-22 (morning): NVDEC H.265
+
+galen e291f30: `c2.rey.hevc.decoder` (Main profile) next to the H.264 one;
+component generalized to C2NvdecDec, shared VIC/detile code in nvdec_common.
+Details and the engine interface in experiments/nvdec/README.md (stage 3).
+Bit-exact on 11 test streams via the library and on 4 via MediaCodec. Tested
+on the board by bind-mounting the new service binary and odm codec XML and
+restarting the HAL and mediaserver (tmpfs mounts; gone after reboot); not yet
+in a flashed image.
+
+Paramount+ live TV / on-demand spin forever: the image has no Widevine HAL
+(only ClearKey), and protected streams need it. Previews are clear content.
+Deferred by the user ("will do drm later").

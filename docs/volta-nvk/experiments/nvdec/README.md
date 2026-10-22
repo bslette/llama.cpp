@@ -50,3 +50,60 @@ The component (`c2.rey.avc.decoder`, galen `codec2/`, commit 39eccc0) runs in
 `android.hardware.media.c2-default-service` (AIDL IComponentStore/default,
 mediacodec domain); rank 128 ahead of c2.android.* (0x200); its
 media_codecs_c2.xml lives on odm.
+
+## Stage 3: H.265 (2026-10-22)
+
+`hevcdec.c/h` (galen e291f30, `c2.rey.hevc.decoder`): Main profile, 8-bit
+4:2:0, up to 4096x4096. Same channel, surfaces (TBL, 17 slots) and VIC path
+as H.264; the shared parts moved to `nvdec_common.c/h` (VIC copy, CPU
+detiler, `struct nvdec_picture`) and `nvdec_bits.h` (RBSP bit reader).
+`nvdec_cli` decodes either codec by file extension.
+
+Engine interface, from nvdec_drv.h `nvdec_hevc_pic_s` and the unmerged Mesa
+NVK branch (gitlab dwlsalmeida/mesa `nvk-vulkan-video-h265`, h265.rs, WIP):
+
+- APP_ID/codec 7. Methods: DRV_PIC_SETUP, IN_BUF_BASE, PICTURE_INDEX,
+  COLOC_DATA, NVDEC_STATUS, PICTURE_LUMA/CHROMA_OFFSET0..16, plus
+  HEVC_SET_SCALING_LIST_OFFSET 0x580, TILE_SIZES 0x584, FILTER_BUFFER 0x588,
+  SAO_BUFFER 0x58c. EXECUTE with AWAKEN as for H.264.
+- Bitstream: the picture's VCL NAL units with 00 00 01 start codes
+  (`sw_start_code_e` 1), `stream_len` = their length.
+- The engine parses the slice segment headers itself except the RPS syntax:
+  `sw_hdr_skip_length` = RBSP bits from pic_output_flag through the
+  long-term ref syntax (all of it, incl. lt_idx_sps/poc_lsb_lt/msb cycles),
+  `num_bits_short_term_ref_pics_in_slice`, `num_delta_pocs_of_rps_idx`.
+- References: engine picture index = surface index. `RefDiffPicOrderCnts[idx]`
+  = POC(cur) - POC(ref), `longtermflag` bit 15-idx, `initreflistidxl0/l1` =
+  RefPicListTemp0/1 (StCurrBefore/After/LtCurr, repeated to 16 entries),
+  `num_ref_frames` = NumPicTotalCurr, `curr_pic_idx` = current surface.
+- Collocated MVs: one block per surface, w64*h64/16 bytes each
+  (`colMvBuffersize` in 256-byte units).
+- Filter buffer: left deblock / SAO / BSD regions (offsets in the pic struct,
+  256-byte units), above-row regions via v1 HevcFltAboveOffset/
+  HevcSaoAboveOffset; sized generously from the HEVC_*_BUF_SIZE macros.
+- Tile sizes: (width, height) u16 pairs in CTBs per tile, raster order; one
+  pair for the whole picture without tiles (Hantro G2 layout).
+- Scaling lists: 6 DC (16x16) + 2 DC (32x32), 8 bytes pad, then 6x 4x4,
+  6x 8x8, 6x 16x16 (8x8 base), 2x 32x32, each converted from diagonal to
+  raster order and written column by column (Hantro G2 layout); defaults
+  when the SPS enables lists without data.
+- `pattern_id` 2 (from the NVK trace), init_qp includes 6*(bitdepth-8).
+
+Driver-side: POC (prevTid0Pic), RPS derivation and DPB marking, NoRaslOutput
+handling (decode starts at the next IRAP after create/reset/EOS; its RASL
+pictures are dropped), pic_output_flag. Reorder depth =
+sps_max_num_reorder_pics of the highest sub-layer.
+
+Results (x265 / kvazaar streams, ffmpeg references), all bit-exact:
+352x288 intra, IP, IPB B-pyramid, default scaling lists, custom asymmetric
+scaling lists; 720p WPP; 720p 3x2 tiles (kvazaar); 720p 4 slices; 1080p
+open GOP; 640x360 open GOP keyint 30; the same cut at its second CRA
+(64 AUs -> 60 pictures). ~7 ms engine time per 1080p picture.
+
+Through MediaCodec (`mcdec.c`, NDK; needs a binder thread pool for the codec
+callbacks, and SELinux keeps a shell-domain client from sharing buffers with
+the vendor codec, so it ran briefly permissive from the root console):
+c2.rey.hevc.decoder is chosen for video/hevc; 1080p, open GOP and CRA-start
+MP4s bit-exact, H.264 still bit-exact. Not covered: long-term references,
+ref_pic_list_modification, inter-RPS prediction in the slice header (code
+paths written, no test stream), Main10.
