@@ -767,3 +767,35 @@ malformed job (cond at bit 8) until reboot.
 Next (stage 2): Android Codec2 component: NVDEC into TBL surfaces, VIC (or CPU)
 to pitch-linear NV12 gralloc buffers (minigbm/nouveau dma-bufs imported into
 tegra-drm), then HEVC/VP9 (nvdec_drv.h has the structs).
+
+## 2026-10-21 (night): microG verified, Paramount+ artwork corruption (open), native fences
+
+Slot a with microG + c0e2314: microG is the network and fused location
+provider (org.microg.gms.location.provider.*), GmsCore requests
+FAKE_PACKAGE_SIGNATURE; Paramount+ no longer crashes (no LocationServices
+exception), profile picker and home load. Its "you're offline" banner stays
+although Ethernet is validated (Wi-Fi had been left disabled; re-enabled).
+
+Black-dash corruption on the home screen hero/tiles, still open. Facts:
+- the hero is a video (c2.android.avc.decoder starts with the home screen);
+- each new frame gets its own fixed pattern, stable while that frame is up;
+- the dashes are crisp 8x4-pixel rectangles at screen resolution, i.e. one
+  128-byte chunk of an RGBA block-linear surface, so they are in a GPU-side
+  offscreen surface after scaling, not in the decoded YUV buffer (that would
+  be filtered) and not in the linear window buffer;
+- not reproduced in isolation: YUV import/sampling per-pixel exact (YV12 and
+  YCbCr_420_888, real offsets/strides), CPU-written buffers with plain stores,
+  reused EGLImage textures, render-to-texture then sample (20 frames, 0 bytes).
+- unchanged with native fence fds (below), so not the ImageConsumer release
+  fence race. hwui on Vulkan (skiavk) cannot be used to compare: it asserts on
+  NVK's single graphics queue (queueCount < kRequestedQueueCount).
+
+Mesa 26dc8ba (`rey-nouveau-gv11b-24-volta`): nvc0 native fence fds. fence_get_fd
+exports the per-fence bo's implicit fence (DMA_BUF_IOCTL_EXPORT_SYNC_FILE),
+create_fence_fd wraps a sync_file, fence_server_sync waits on the CPU. EGL now
+lists EGL_ANDROID_native_fence_sync; the system runs on it (tested by bind
+mount + framework restart, not yet flashed).
+
+NVDEC from Android: the stage 1 tool built with the NDK runs unprivileged
+(renderD128 = tegra-drm, 0666, gpu_device) and decodes the 720p clip
+bit-exact (60/60).
