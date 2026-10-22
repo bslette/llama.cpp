@@ -72,6 +72,8 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | drm_hwcomposer `bslette/android_external_drm_hwcomposer-upstream` rey-24 e7a1d91 | initialize LayerData colorspace; compare unset colorspace as BT.709 | streaming chat: GPU composition 1018 M -> 53 M pixels / 12 s, efficiency 0 -> 0.93, Qwen2.5-3B tg 15.4 -> 16.5 in ChatterUI |
 | drm_hwcomposer fork rey-24 d122bc5 | client-compose only the layers no plane takes (tegra planes have no alpha property) | failed plane tests 12/300 frames -> 1/2364; efficiency 0.98 |
 | kernel `rey-nouveau-gv11b-6.18-v68-l2` c9fa4e8 | tegra: imported dma-bufs share the exporter's reservation object, so commits wait for the GPU's implicit write fence | no half-rendered app frames on planes (ChatterUI drawer flash gone) |
+| Mesa `rey-nouveau-gv11b-24-volta` c0e2314 | nouveau imports dma-buf planes at an offset (multi-planar YUV EGLImages) | YV12/YCbCr_420_888/NV12 import; Paramount+ no longer aborts in hwui |
+| galen rey-24 ab80de7 + partner_gms fork rey-24 1361bd7 | microG (GmsCore, FakeStore, GsfProxy) through LineageOS's built-in microG signature spoofing | Play Services location API for apps |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)
 

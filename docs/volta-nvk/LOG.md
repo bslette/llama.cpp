@@ -725,3 +725,30 @@ Hardware decode: the board binds tegra-nvdec/nvjpg/vic (upstream host1x
 channel UAPI, firmware only). Upstream Mesa main (2c16073) has NVK Vulkan
 Video H.264 decode on NVIDIA's published nvdec_drv.h + clc5b0.h; the L4T
 R35 multimedia stack (oldcrustylx ~/nvidia) can serve as a reference trace.
+
+## 2026-10-21 (night): microG
+
+With the YUV fix Paramount+ got further and then died in Java:
+`LocationServices.API is not available on this device ... SERVICE_INVALID`
+(no Play Services; only com.android.location.fused).
+
+LineageOS 24 frameworks/base already has microG signature spoofing
+(198fa728, only for apps signed with the microG key), so no framework patch.
+Added vendor/partner_gms from a bslette fork of
+lineageos4microg/android_vendor_partner_gms (rey-24 1361bd7): products/microg.mk
+(GmsCore, FakeStore, GsfProxy; no F-Droid), and vendorsetup.sh fetches only
+those APKs of microG v0.3.16.1.252432 pinned by SHA-256 (GmsCore is 108 MB,
+over GitHub's file limit, so not committed). All three are signed by the
+microG key Lineage trusts (cert SHA-256 9bd06727...d14165). galen rey-24
+ab80de7 sets WITH_GMS := true, GMS_MAKEFILE := microg.mk in lineage.mk;
+manifest zz-bslette-forks.xml has the project. Build 574 s: GmsCore and
+FakeStore in /product/priv-app, GsfProxy in /product/app.
+
+Location without GPS: `cmd location providers add-test-provider gps` +
+`set-test-provider-location gps --location LAT,LONG` (shell needs
+`appops set com.android.shell android:mock_location allow`).
+
+Open: black dash corruption on Paramount+ artwork tiles (not video: no codec
+running). CPU-written YV12/RGBA sampling and the hwui hardware-bitmap upload
+path (glTexSubImage2D into an EGLImage, fence, second context) are exact in
+isolation (scratchpad ahbsample.c, hwbitmap.c).
