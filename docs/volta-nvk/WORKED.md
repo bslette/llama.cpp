@@ -76,6 +76,8 @@ Upstream-Mesa-ready copy of the IDP.4A fix and its hardware test: stealth
 | galen rey-24 ab80de7 + partner_gms fork rey-24 1361bd7 | microG (GmsCore, FakeStore, GsfProxy) through LineageOS's built-in microG signature spoofing | Play Services location API for apps |
 | galen rey-24 39eccc0 | Codec2 `c2.rey.avc.decoder`: H.264 on NVDEC (upstream tegra-drm channel UAPI), VIC writes the NV12 gralloc buffer | bit-exact vs ffmpeg up to 1080p High; Paramount+ previews use it |
 | galen rey-24 e291f30 | `c2.rey.hevc.decoder`: H.265 Main on NVDEC; component generalized (C2NvdecDec) | 11 streams bit-exact (tiles, WPP, slices, scaling lists, open GOP, CRA start); MediaCodec picks it for video/hevc, bit-exact; ~7 ms per 1080p picture |
+| galen rey-24 dd97f0e | `c2.rey.vp9.decoder`: VP9 profile 0 on NVDEC; driver-side header parsing, probability contexts and backward adaptation (libvpx), Hantro G2 table layouts; per-size surfaces | 24 libvpx test vectors bit-exact (official md5) + 1080p30 libvpx encode; MediaCodec bit-exact incl. SVC and resize; ~2 ms engine per 1080p frame |
+| galen rey-24 f8ffab2 | NVDEC components release pictures when next in display order; running work's picture sent in a clone (fixes reordered delivery); H.264 POC type 2 depth 0; lazy surface allocation | paced latency H.264 1080p 108 → 57 ms (first output 460 → 220), H.265 1080p 118 → 74 ms (427 → 186); output unchanged |
 | Mesa `rey-nouveau-gv11b-24-volta` 06c81b9 | nvc0 GV100: PIXLD and IMAD encode PT as their predicate destination (bits 81..83 were 0 = P0) | Paramount+ hero 8x4 black blocks gone (Skia dst-read blend shader) |
 
 ## Tooling (bazzite `lineage/tools/`, not in git)

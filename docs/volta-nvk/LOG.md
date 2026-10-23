@@ -876,3 +876,78 @@ bind mounts: libgallium_dri c86bb756 (06c81b9), Paramount+ hero 0 black
 cells; codec list has c2.rey.avc.decoder and c2.rey.hevc.decoder; MediaCodec
 h5_1080p (HEVC 1080p, open GOP) 60/60, h11_cracut (CRA start) 60/60 and t5
 (H.264 1080p High) 90/90 bit-exact.
+
+## 2026-10-23: trusted OS experiments on slot b (reverted)
+
+Tried to bring up OP-TEE on the slot b boot chain (secure-os_b only; slot a
+untouched). None of it booted; the original secure-os_b is restored
+(readback-verified) and slot b boots Linux 6.18 as before. Details in
+DIDNT-WORK.md. Useful findings for any later boot-chain work:
+
+- tegraflash's single-partition `signwrite` signs with an empty magic id
+  (source "fixme"); MB2 rejects the TOS ("Stage2Signature validation failed
+  with SHA2") and the chain falls back to A after 4 tries. Signing by hand
+  with `--magicid TOSB` (tegrahost/tegrasign, zerosbk) gives the same header
+  layout as a full flash.
+- tegradevflash `write` of one QSPI partition does not erase first: the
+  result was exactly old AND new. Erase, write, read back and compare.
+- NVIDIA r35 ATF v2.6 + OP-TEE under galen's r32 MB1/MB2: BL31 starts, then
+  fatal RAS errors (MTS_CARVEOUT access). Lineage's ATF v2.12 with
+  SPD=opteed: "Unhandled Exception in EL3" at "Initializing BL32"; upstream
+  ATF supports only Trusty on Tegra194.
+
+## 2026-10-23: VP9 on NVDEC (c2.rey.vp9.decoder)
+
+New Codec2 component, galen dd97f0e. The engine decodes tile data; the
+driver parses both headers, keeps the four probability contexts, writes the
+frame's probability table and adapts from the engine's symbol counts
+(libvpx semantics, tables generated from external/libvpx). Probability and
+count tables and auxiliary buffers are the Hantro G2 layouts (Linux
+hantro_g2_vp9_dec.c): probs/counts structs in nvdec_drv.h match them field
+for field.
+
+What it took:
+- mcomp_filter_type is in VP9 spec order (smooth 0, regular 1), the reverse
+  of libvpx/CUVID; first failing frame in 6 vectors was the first one with a
+  fixed EIGHTTAP filter. The switchable-filter counts are in libvpx order.
+- References: like libvpx, one reference must be scalable (2x down..16x up),
+  others may not be (SVC lists the full-size slot from a small layer).
+- Only the last shown frame of a superframe is output (SVC: top layer).
+- Intra-only frames resync the decoder (vp90-2-16 starts with them).
+- Under 128x128 the engine misdecodes (8x8 gives zeros, 66x66 diverges at
+  frame 5); NVIDIA documents 128x128 as the VP9 minimum. Rejected, and the
+  codec list starts at 128x128 so small streams take the software decoder.
+- VIC "completes" NV12 jobs with odd target sizes without writing; those
+  pictures take the CPU copy. CPU copy and VIC chroma sizes round up.
+
+Results: 24 of 28 libvpx vectors bit-exact against the official md5 (the
+other 4 are rejected on purpose: 8x8, 66x66, 19200 wide, 4:4:4), plus a
+300-frame 1080p30 libvpx encode (alt-ref, 4 tile columns). Through
+MediaCodec: 1080p30, tile-4x4, show-existing, 3-layer SVC, aq2 and resize
+(282x173) bit-exact. Engine about 2 ms per 1080p frame, setup 0.3 ms.
+Harness: experiments/nvdec/vp9 (vp9test.c, runall.sh, cmp.py), Android
+scripts in experiments/nvdec/android.
+
+## 2026-10-23: decode latency (galen f8ffab2)
+
+Measured with mcdec MCDEC_REALTIME=1 (input paced at the stream rate,
+latency = output time - queue time). The old "383 ms" note was an unpaced
+run, which measures the input backlog.
+
+| Stream | avg before | avg after | first output before | after |
+|---|---|---|---|---|
+| H.264 1080p t5 (B-pyramid, reorder 2) | 108 ms | 57 ms | 460 ms | 220 ms |
+| H.265 1080p h5 | 118 ms | 74 ms | 427 ms | 186 ms |
+| H.265 360p h10_gop | 75 ms | 46 ms | 157 ms | 110 ms |
+| VP9 1080p30 | 12 ms | 12 ms | 163 ms | 158 ms |
+
+- First output: all 17 surfaces were allocated (and VIC-mapped) before the
+  first picture; now each is allocated when the DPB first uses it.
+- A picture leaves the reorder queue as soon as it is next in display order
+  (period start without leading pictures, or POC = last output + step; step
+  1 for H.265, 2 for H.264 frames unless an odd POC was seen).
+- That exposed an old ordering bug: the running work's picture was only
+  delivered when process() returned, after older works finished in the same
+  call. It now goes out in a clone immediately.
+- H.264 POC type 2: reorder depth 0.
+All MediaCodec outputs unchanged (bit-exact).

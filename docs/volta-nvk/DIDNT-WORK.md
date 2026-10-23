@@ -84,3 +84,19 @@ Keep every failed attempt here with the reason, so it isn't repeated.
   19.3 us with the pin Intel-only); the register cache of the row was.
 - nouveau on an Ada laptop GPU: after runtime suspend/resume every job timed
   out. Keep a DRM client open (render node fd) for the whole benchmark.
+- Trusted OS on slot b (2026-10-23, reverted, original secure-os_b restored):
+  tegraflash `signwrite` signs with an empty magic id, so MB2 rejects the TOS;
+  single-partition `write` does not erase QSPI (result = old AND new);
+  NVIDIA r35 ATF + OP-TEE under the r32 MB1/MB2 dies in RAS errors
+  (MTS_CARVEOUT); Lineage ATF v2.12 SPD=opteed takes an EL3 exception when
+  initialising BL32 (upstream ATF supports only Trusty on Tegra194).
+- VP9 on NVDEC below 128x128: 8x8 decodes to zeros, 66x66 diverges after a
+  few frames (NVIDIA documents 128x128 as the minimum). Rejected instead.
+- VIC with an odd NV12 target size (VP9 282x173): the job completes and
+  writes nothing. Those pictures use the CPU copy.
+- VP9 mcomp_filter_type in libvpx/CUVID order: wrong for every frame with a
+  fixed regular/smooth filter; the engine wants spec order. Swapping the
+  switchable-filter counts the same way broke adaptation: those are libvpx order.
+- Emitting several pictures per process() call with the running work's
+  picture left on the work: Codec2 delivers it after older works finished
+  in the same call, so output came out of order (frames 0,2,1,4,5,3...).

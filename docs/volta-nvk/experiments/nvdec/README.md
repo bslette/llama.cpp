@@ -107,3 +107,23 @@ c2.rey.hevc.decoder is chosen for video/hevc; 1080p, open GOP and CRA-start
 MP4s bit-exact, H.264 still bit-exact. Not covered: long-term references,
 ref_pic_list_modification, inter-RPS prediction in the slice header (code
 paths written, no test stream), Main10.
+
+# VP9 (2026-10-23, galen dd97f0e)
+
+The decoder itself is `codec2/nvdec/vp9dec.c` in device/nvidia/galen (with
+`vp9_tables.h` generated from external/libvpx by `gen_vp9_tables.py`).
+
+- `vp9/vp9test.c`: IVF in, I420 + per-frame sizes out. Build on the board next
+  to the galen nvdec sources: `gcc -std=gnu11 -O2 -I/usr/include/libdrm -o
+  vp9test vp9test.c vp9dec.c nvdec_common.c host1x.c`. `VP9DEC_DEBUG=1` prints
+  each frame header, `H264DEC_TIMING=1` setup/engine times.
+- `vp9/runall.sh` + `vp9/cmp.py`: run every vector on the board and compare
+  frame by frame with libvpx's official `.md5` lists (test data from
+  storage.googleapis.com/downloads.webmproject.org/test_data/libvpx).
+  `vp9/jroot.py` runs a command as root on nx-linux; it takes the password
+  from `JROOT_PW`.
+- `android/c2test.sh` / `c2restore.sh`: overlay a Codec2 service + codec list
+  build on slot a with tmpfs bind mounts (root on the serial console);
+  `android/mctest.sh` runs `mcdec` permissive for the run only. `mcdec.c`:
+  `MCDEC_REALTIME=1` paces input and prints decode latency.
+

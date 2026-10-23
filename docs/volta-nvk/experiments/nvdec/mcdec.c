@@ -1,7 +1,9 @@
 /*
  * mcdec in.mp4 out.yuv [codec name]: decode the first video track through
  * MediaCodec (ByteBuffer output) and write I420 frames, to test the Codec2
- * components end to end.
+ * components end to end. With MCDEC_REALTIME=1 the input is paced by its
+ * timestamps (as a player feeds it) and the decode latency per frame is
+ * reported: output time minus the time its input was queued.
  */
 #include <dlfcn.h>
 #include <media/NdkMediaCodec.h>
@@ -18,6 +20,9 @@
 #include <unistd.h>
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
+
+#define NQ 4096
+static struct { int64_t pts; double t; } queued_at[NQ]; /* ring of input queue times */
 
 int main(int argc, char **argv) {
     if (argc < 3) { fprintf(stderr, "usage: %s in.mp4 out.yuv [codec]\n", argv[0]); return 1; }
@@ -51,13 +56,21 @@ int main(int argc, char **argv) {
     int in_eos = 0, frames = 0;
     int32_t w = 0, h = 0, stride = 0, slice = 0, color = 0, cl = 0, ct = 0, cr = -1, cb = -1;
     double t0 = now_ms(), last = t0;
-    int queued = 0, iters = 0;
+    int queued = 0, iters = 0, realtime = getenv("MCDEC_REALTIME") != NULL, lat_n = 0, max_inflight = 0;
+    double lat_sum = 0, lat_max = 0, first_out = 0;
+    int64_t first_pts = -1;
     for (;; iters++) {
         if (now_ms() - last > 2000) {
             last = now_ms();
             printf("progress: %d queued, in_eos %d, %d frames out, %d iterations\n", queued, in_eos, frames, iters);
         }
         if (!in_eos) {
+            int64_t next_pts = AMediaExtractor_getSampleTime(ex);
+            if (realtime && next_pts >= 0) {
+                if (first_pts < 0) first_pts = next_pts;
+                double due = t0 + (next_pts - first_pts) / 1000.0;
+                if (now_ms() < due) { usleep(1000); goto output; }
+            }
             ssize_t i = AMediaCodec_dequeueInputBuffer(codec, 10000);
             if (i >= 0) {
                 size_t cap;
@@ -67,15 +80,19 @@ int main(int argc, char **argv) {
                     AMediaCodec_queueInputBuffer(codec, i, 0, 0, 0, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
                     in_eos = 1;
                 } else {
-                    media_status_t qs = AMediaCodec_queueInputBuffer(codec, i, 0, n, AMediaExtractor_getSampleTime(ex), 0);
+                    int64_t pts = AMediaExtractor_getSampleTime(ex);
+                    queued_at[queued % NQ].pts = pts;
+                    queued_at[queued % NQ].t = now_ms();
+                    media_status_t qs = AMediaCodec_queueInputBuffer(codec, i, 0, n, pts, 0);
                     if (qs != AMEDIA_OK) printf("queueInputBuffer: %d\n", qs);
                     queued++;
                     AMediaExtractor_advance(ex);
                 }
             }
         }
+    output:;
         AMediaCodecBufferInfo info;
-        ssize_t o = AMediaCodec_dequeueOutputBuffer(codec, &info, 10000);
+        ssize_t o = AMediaCodec_dequeueOutputBuffer(codec, &info, realtime ? 0 : 10000);
         if (o == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
             AMediaFormat *of = AMediaCodec_getOutputFormat(codec);
             AMediaFormat_getInt32(of, AMEDIAFORMAT_KEY_WIDTH, &w);
@@ -91,23 +108,35 @@ int main(int argc, char **argv) {
             size_t size;
             uint8_t *buf = AMediaCodec_getOutputBuffer(codec, o, &size);
             if (info.size > 0 && buf) {
+                double t = now_ms();
+                for (int k = queued - 1; k >= 0 && k >= queued - NQ; k--)
+                    if (queued_at[k % NQ].pts == info.presentationTimeUs) {
+                        double l = t - queued_at[k % NQ].t;
+                        lat_sum += l;
+                        lat_n++;
+                        if (l > lat_max) lat_max = l;
+                        break;
+                    }
+                if (!frames) first_out = t - t0;
+                if (queued - frames > max_inflight) max_inflight = queued - frames;
                 int vw = cr - cl + 1, vh = cb - ct + 1;
                 int s = stride ? stride : w, sh = slice ? slice : h;
                 const uint8_t *y = buf + info.offset, *c = y + (size_t)s * sh;
                 for (int r = 0; r < vh; r++) fwrite(y + (size_t)(ct + r) * s + cl, 1, vw, out);
                 if (color == 21) { /* NV12 */
-                    uint8_t *row = malloc(vw);
+                    uint8_t *row = malloc(vw + 1);
                     for (int p = 0; p < 2; p++)
-                        for (int r = 0; r < vh / 2; r++) {
+                        for (int r = 0; r < (vh + 1) / 2; r++) {
                             const uint8_t *src = c + (size_t)(ct / 2 + r) * s + cl;
-                            for (int x = 0; x < vw / 2; x++) row[x] = src[2 * x + p];
-                            fwrite(row, 1, vw / 2, out);
+                            for (int x = 0; x < (vw + 1) / 2; x++) row[x] = src[2 * x + p];
+                            fwrite(row, 1, (vw + 1) / 2, out);
                         }
                     free(row);
                 } else { /* I420 */
                     for (int p = 0; p < 2; p++) {
                         const uint8_t *pl = c + (size_t)p * (s / 2) * (sh / 2);
-                        for (int r = 0; r < vh / 2; r++) fwrite(pl + (size_t)(ct / 2 + r) * (s / 2) + cl / 2, 1, vw / 2, out);
+                        for (int r = 0; r < (vh + 1) / 2; r++)
+                            fwrite(pl + (size_t)(ct / 2 + r) * ((s + 1) / 2) + cl / 2, 1, (vw + 1) / 2, out);
                     }
                 }
                 frames++;
@@ -120,6 +149,9 @@ int main(int argc, char **argv) {
         }
     }
     printf("%d frames %dx%d (stride %d, slice %d, color %d) in %.0f ms\n", frames, w, h, stride, slice, color, now_ms() - t0);
+    if (lat_n)
+        printf("latency: avg %.1f ms, max %.1f ms, first output after %.1f ms, up to %d frames in flight\n",
+               lat_sum / lat_n, lat_max, first_out, max_inflight);
     fclose(out);
     AMediaCodec_stop(codec);
     AMediaCodec_delete(codec);
