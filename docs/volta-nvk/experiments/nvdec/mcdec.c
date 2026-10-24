@@ -3,12 +3,16 @@
  * MediaCodec (ByteBuffer output) and write I420 frames, to test the Codec2
  * components end to end. With MCDEC_REALTIME=1 the input is paced by its
  * timestamps (as a player feeds it) and the decode latency per frame is
- * reported: output time minus the time its input was queued.
+ * reported: output time minus the time its input was queued. With
+ * MCDEC_SURFACE=1 the output goes to an AImageReader surface (no CPU copy, as a
+ * player renders it) and nothing is written: decoder throughput.
  */
 #include <dlfcn.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaFormat.h>
+#include <media/NdkImageReader.h>
+#include <android/hardware_buffer.h>
 
 #include <fcntl.h>
 #include <stdbool.h>
@@ -18,6 +22,12 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+static void on_image(void *ctx, AImageReader *r) {
+    (void)ctx;
+    AImage *img = NULL;
+    while (AImageReader_acquireNextImage(r, &img) == AMEDIA_OK) AImage_delete(img);
+}
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
 
@@ -48,7 +58,23 @@ int main(int argc, char **argv) {
     char *name = NULL;
     AMediaCodec_getName(codec, &name);
     printf("%s: %s\n", mime, name);
-    if (AMediaCodec_configure(codec, fmt, NULL, NULL, 0) != AMEDIA_OK || AMediaCodec_start(codec) != AMEDIA_OK) {
+    int surface = getenv("MCDEC_SURFACE") != NULL;
+    ANativeWindow *window = NULL;
+    if (surface) {
+        int32_t fw = 0, fh = 0;
+        AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, &fw);
+        AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &fh);
+        AImageReader *reader = NULL;
+        if (AImageReader_newWithUsage(fw, fh, AIMAGE_FORMAT_PRIVATE, AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, 8,
+                                      &reader) != AMEDIA_OK ||
+            AImageReader_getWindow(reader, &window) != AMEDIA_OK) {
+            fprintf(stderr, "no image reader\n");
+            return 1;
+        }
+        static AImageReader_ImageListener l = {NULL, on_image};
+        AImageReader_setImageListener(reader, &l);
+    }
+    if (AMediaCodec_configure(codec, fmt, window, NULL, 0) != AMEDIA_OK || AMediaCodec_start(codec) != AMEDIA_OK) {
         fprintf(stderr, "configure/start failed\n");
         return 1;
     }
@@ -106,8 +132,8 @@ int main(int argc, char **argv) {
         } else if (o >= 0 || o == AMEDIACODEC_INFO_TRY_AGAIN_LATER || o == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
             if (o < 0) continue;
             size_t size;
-            uint8_t *buf = AMediaCodec_getOutputBuffer(codec, o, &size);
-            if (info.size > 0 && buf) {
+            uint8_t *buf = surface ? NULL : AMediaCodec_getOutputBuffer(codec, o, &size);
+            if (info.size > 0 && (buf || surface)) {
                 double t = now_ms();
                 for (int k = queued - 1; k >= 0 && k >= queued - NQ; k--)
                     if (queued_at[k % NQ].pts == info.presentationTimeUs) {
@@ -119,6 +145,12 @@ int main(int argc, char **argv) {
                     }
                 if (!frames) first_out = t - t0;
                 if (queued - frames > max_inflight) max_inflight = queued - frames;
+                if (surface) {
+                    frames++;
+                    AMediaCodec_releaseOutputBuffer(codec, o, true);
+                    if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) break;
+                    continue;
+                }
                 int vw = cr - cl + 1, vh = cb - ct + 1;
                 int s = stride ? stride : w, sh = slice ? slice : h;
                 const uint8_t *y = buf + info.offset, *c = y + (size_t)s * sh;
@@ -148,7 +180,9 @@ int main(int argc, char **argv) {
             break;
         }
     }
-    printf("%d frames %dx%d (stride %d, slice %d, color %d) in %.0f ms\n", frames, w, h, stride, slice, color, now_ms() - t0);
+    double total = now_ms() - t0;
+    printf("%d frames %dx%d (stride %d, slice %d, color %d) in %.0f ms, %.1f fps\n", frames, w, h, stride, slice, color,
+           total, frames * 1000.0 / total);
     if (lat_n)
         printf("latency: avg %.1f ms, max %.1f ms, first output after %.1f ms, up to %d frames in flight\n",
                lat_sum / lat_n, lat_max, first_out, max_inflight);

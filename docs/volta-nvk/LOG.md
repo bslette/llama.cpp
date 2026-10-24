@@ -982,3 +982,25 @@ an input surface -> MediaCodec). Details and files: experiments/nvenc/README.md.
 Pitfall: mcenc first wrote planar I420 into CCodec's input ByteBuffer; it is the
 NV12 gralloc buffer (stride 768 for 640 wide, UV at stride*height). The NDK input
 format has no "image-data"; tell the layout from the buffer size.
+
+## 2026-10-23 (night): 4K tests (galen c7f52d5)
+
+Clips: the 1080p source upscaled to 3840x2160, 120 frames at 60 fps, x264 High
+5.1 with B frames, x265 Main, libvpx VP9; references = ffmpeg's decode.
+
+- Correctness through MediaCodec: H.264 and VP9 4K bit-exact. H.265 4K wrong in
+  the bottom 4 rows of CTB rows 18-20 (+ the deblocking below them). Cause: the
+  above-row deblocking area of the filter buffer was too small; the Xavier
+  firmware stores it per CTB row. Swept the size (multiples of
+  HEVC_DBLK_TOP_BUF_SIZE): needs 4x at 1080 rows, 7x at 2160, same for every
+  width (1920, 3840, 4096). Now (CTB rows + 2) * (columns/16 + 2) * 256 B.
+  After the fix 3840x2160, 4096x2160, 1920x2160, 3840x1080 H.265 bit-exact.
+- Throughput, decoding to an AImageReader surface (mcdec MCDEC_SURFACE=1, no CPU
+  copy; ByteBuffer output tops out at ~15 fps at 4K from the copies):
+  H.264 42.7 fps, H.265 65.6 fps, VP9 55.7 fps unpaced; paced at 60 fps H.265
+  keeps up (59.1, avg latency 68 ms), VP9 56.1, H.264 42.5.
+  Each picture is decoded synchronously (submit, wait, VIC copy); overlapping
+  pictures or using NVDEC1 would be next for 4K60 H.264/VP9.
+- Encoder 4K: MediaCodec NV12 3840x2160 at 40 Mbit/s 56.5 dB, 23 fps through
+  mcenc (its CPU copy of the input is part of that); screenrecord --size
+  3840x2160 works (RGBA via VIC, level 5.2).
