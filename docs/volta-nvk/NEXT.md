@@ -4,8 +4,8 @@
 
 NVDEC Codec2 now covers H.264, H.265 Main and VP9 profile 0 (galen rey-24
 f8ffab2), bit-exact through MediaCodec; tested with bind mounts, not flashed.
-1. Flash slot a with dd97f0e + f8ffab2 and recheck the codec list and a
-   YouTube session (VP9 is what the app prefers when a hardware decoder exists).
+1. (Flashed 2026-10-23 with the encoder build.) Check a YouTube session (VP9 is
+   what the app prefers when a hardware decoder exists).
 2. 10-bit (HEVC Main10, VP9 profile 2) only matters with an HDR output path.
 3. AV1 has no hardware on Xavier; the software decoder stays.
 4. Protected content needs a Widevine license (deferred).
