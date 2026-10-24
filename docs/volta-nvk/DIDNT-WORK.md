@@ -100,3 +100,14 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 - Emitting several pictures per process() call with the running work's
   picture left on the work: Codec2 delivers it after older works finished
   in the same call, so output came out of order (frames 0,2,1,4,5,3...).
+- NVENC configured from nvenc_drv.h's comments alone (2026-10-23): tiled-16x16
+  reference pictures, block_height counted as log2 of 4 GOBs, -1 for unused
+  reference entries, zeroed ME/MD controls: the engine wrote an early status
+  (error_status 1) and never finished the job. NVIDIA's actual setup (captured on
+  L4T) differs in all of those.
+- Encoder input tiled with 4-GOB blocks while the engine read 2-GOB blocks: the
+  reconstruction looked right (same scramble both ways), a decoder's output did
+  not. Compare decode against recon, not recon against source.
+- VIC RGB input with SlotLumaWidth in bytes: the job completes and writes nothing.
+  It is in pixels.
+

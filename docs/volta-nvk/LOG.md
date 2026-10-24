@@ -951,3 +951,34 @@ run, which measures the input backlog.
   call. It now goes out in a clone immediately.
 - H.264 POC type 2: reorder depth 0.
 All MediaCodec outputs unchanged (bit-exact).
+
+## 2026-10-23 (evening): H.264 encoding on NVENC (c2.rey.avc.encoder)
+
+Goal: hardware encoding for screen capture / live streaming (MediaProjection or
+an input surface -> MediaCodec). Details and files: experiments/nvenc/README.md.
+
+1. Kernel: tegra-drm had no NVENC driver (the DT nodes and host1x classes 0x21/0x22
+   exist). New nvenc.c (nvdec.c minus RISC-V; TRANSCFG at 0x1844 from L4T nvhost
+   t194.c). Linux slot b: module built in ~/nouveau-l2/kfull, installed as
+   /lib/modules/6.18.21-nx+/updates/tegra-drm.ko (fbcon holds tegra-drm, so no
+   rmmod). Both engines boot the firmware, run jobs, release semaphores.
+2. Firmware magic 0xC5B70006 (NVENC 7.0) found in nvenc.bin; nvenc_drv.h (8.2)
+   struct sizes match. First attempts from the header alone hung the engine (it
+   recovers after the runtime-PM idle cycle).
+3. Booted slot b into L4T (flash-slotb.sh l4t, back with linux618 and
+   SSH_ASKPASS for the nx password) and captured NVIDIA's own submits from the
+   multimedia API sample 01_video_encode with an LD_PRELOAD shim: surfaces are
+   block linear (not tiled 16x16), block_height 2 = 2 GOBs, separate luma/chroma
+   methods, l0 entries -2, plus all ME/MD/quant/RC values.
+4. Harness with those values: decode == the engine's reconstruction, bit-exact,
+   Baseline and High, 320x240 to 1080p (cropping); ~6 ms per 1080p picture. CBR
+   (mode 18) holds the target.
+5. VIC conversion for the input (RGB pitch in pixels; output colour matrix
+   layout and fixed point found by probing), library h264enc.c, Codec2 component.
+6. Flashed slot a (build 20:21, backup nx-linux:/var/tmp/slota-backup-20261023-202234).
+   MediaCodec picks c2.rey.avc.encoder; ByteBuffer NV12 and screenrecord RGBA both
+   go through VIC; outputs decode (51/49/59 dB). galen a06699a.
+
+Pitfall: mcenc first wrote planar I420 into CCodec's input ByteBuffer; it is the
+NV12 gralloc buffer (stride 768 for 640 wide, UV at stride*height). The NDK input
+format has no "image-data"; tell the layout from the buffer size.

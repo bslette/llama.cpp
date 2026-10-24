@@ -9,6 +9,10 @@ f8ffab2), bit-exact through MediaCodec; tested with bind mounts, not flashed.
 2. 10-bit (HEVC Main10, VP9 profile 2) only matters with an HDR output path.
 3. AV1 has no hardware on Xavier; the software decoder stays.
 4. Protected content needs a Widevine license (deferred).
+5. Encoder (c2.rey.avc.encoder, flashed 2026-10-23): try a streaming app
+   (RTMP/WebRTC) and Android's VTS/CTS encoder tests; H.265 encode (same engine,
+   nvenc_h265_* structures; capture NVIDIA's setup the same way); intra refresh
+   and B pictures are not implemented; the second engine (class 0x22) is unused.
 
 ## Android (2026-10-21)
 
