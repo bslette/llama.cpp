@@ -1111,3 +1111,31 @@ NVIDIA 615.78 on the 4060: 7199 GIOPS. Varying-source case is neutral
 (paired runs -4..0%, clock drift dominates). Possible further step: a
 predicated IMNMX (min or max picked by d >= 0) would make the
 varying case 4 ALU instead of 6, needs a from_nir pattern.
+
+## 2026-10-25 (later): saturating dot on Volta (Xavier) and aimini stacks
+
+T194 GV11B is SM72, so 599550ab4c3 (sm >= 73) left it on the old path.
+Board /root/mesa-nvk (volta-cmat-int8 e943159), experiments/satdot/nx-sat.sh:
+
+| Xavier NX | vkpeak int8-dotprod | satbench varying (G dots/s) |
+|---|---|---|
+| old lowering | 532 | 44.0 |
+| IMNMX clamp (imin/imax -> isetp+sel on Volta) | 707 | 33.4 |
+| one bound INT_MAX - d + (d<0), isetp.lt xor (d>=0), sel | 941 | 39.5 |
+| same, bound as one iadd3 | 957 | 43.7 |
+
+Single-compare form on desktop: 4060 vkpeak 8680 (IMNMX form 11078),
+3050 4815 (6263); varying-source the same within noise. So two rules:
+IMNMX clamp for sm >= 73, single compare for Volta. Remaining Volta cost:
+the xor is a separate PLOP3 (NAK doesn't fold it into the ISETP accumulator);
+a predicated IMNMX would help SM73+ the same way. Both need NAK IR peepholes.
+
+aimini references: NVIDIA 595.91 on the 3050: satdot 0 mismatches, vkpeak
+4162, satbench sat 290 / plain 775 G dots/s. ANV Iris Xe (Mesa 26.0.8):
+0 mismatches, vkpeak 6009, sat = plain = 248 (native saturation).
+
+Final branch nak-sdot-sat a1d05768327 (both rules, rebased on main
+837ab0e3074), force-pushed to the fdo fork; rebuilt and checked on the 3050
+(0 mismatches, vkpeak 6326, satbench 240-244 = baseline; the first run after
+the driver switch is slow for whichever build runs first). MR description:
+mr/mesa-nak-sdot-sat.md. Board tree restored to e943159 and rebuilt.

@@ -1,7 +1,7 @@
 #!/bin/bash
 # sat-dot lowering on the RTX 3050: correctness, vkpeak int8-dotprod, varying-source bench
 exec 9</dev/dri/renderD128
-for v in icd-idp icd-sat; do
+for v in icd-idp icd-sat icd-satb; do
   export VK_ICD_FILENAMES=$HOME/nvk-check/$v/nouveau_icd.json
   echo "== $v"
   (cd ~/satdot && ./satdot satdot.spv | tail -1)
