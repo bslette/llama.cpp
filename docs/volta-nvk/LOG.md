@@ -1040,8 +1040,11 @@ Runner ~/xval/xval-m.sh (copy in experiments/xval).
      (2c1607396f1, with our fix) passes the same 49 iq1_m cases.
    - Excluding iq1_m (`-p '^(?!.*type_a=iq1_m,)'`): MUL_MAT 2226/2226 and
      MUL_MAT_ID 1105/1105 on both builds. 1e32f0c: no regression on Ada.
-   aimini (RTX 3050): not run. gpu-to-nouveau.sh unloads nvidia, then
-   `modprobe nouveau` fails because Ubuntu's
-   /usr/lib/modprobe.d/nvidia-graphics-drivers.conf has `alias nouveau off`;
-   needs `modprobe -C /dev/null nouveau` (root-owned script, user to edit).
-   Restored with gpu-to-nvidia.sh (nvidia-powerd left stopped).
+   aimini (RTX 3050): gpu-to-nouveau.sh first failed (Ubuntu's
+   /usr/lib/modprobe.d/nvidia-graphics-drivers.conf has `alias nouveau off`);
+   the script now uses `modprobe -C /dev/null nouveau`. Script
+   ~/xval/nvk-3050.sh (copy in experiments/xval), same filter:
+   - main and fix: MUL_MAT 2226/2226, MUL_MAT_ID 1105/1105, FLASH_ATTN_EXT
+     5368/5368; pp512 TinyLlama Q4_0 FA 3829 vs 3759 t/s (within ~2%).
+   - iq1_m: main loses the device, main-fixed (with the IDP.4A fix) 49/49.
+   1e32f0c: no regression on Ampere either. Card back on the NVIDIA driver.
