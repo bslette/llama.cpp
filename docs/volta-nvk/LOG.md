@@ -1029,3 +1029,19 @@ Runner ~/xval/xval-m.sh (copy in experiments/xval).
    nouveau with the Plasma session logged out (kwin holds /dev/nvidia0);
    gpu-to-nouveau.sh had already stopped cardwired/nvidia-powerd/persistenced,
    restored with gpu-to-nvidia.sh.
+   Run later the same day (Plasma user units stopped: `systemctl --user stop
+   graphical-session.target plasma-kwin_wayland.service` released the card),
+   RTX 4060 on nouveau, NVK main 02f13375 vs + 1e32f0c:
+   - FLASH_ATTN_EXT 5368/5368 on both; pp512 TinyLlama Q4_0 FA 6781 vs 6740 t/s
+     (noise).
+   - MUL_MAT and MUL_MAT_ID abort on both at the first iq1_m case: Xid 13
+     "Illegal Instruction Encoding", device lost. That is the IDP.4A-immediate
+     bug, still on main (02f13375 has no fix); the older main-fixed build
+     (2c1607396f1, with our fix) passes the same 49 iq1_m cases.
+   - Excluding iq1_m (`-p '^(?!.*type_a=iq1_m,)'`): MUL_MAT 2226/2226 and
+     MUL_MAT_ID 1105/1105 on both builds. 1e32f0c: no regression on Ada.
+   aimini (RTX 3050): not run. gpu-to-nouveau.sh unloads nvidia, then
+   `modprobe nouveau` fails because Ubuntu's
+   /usr/lib/modprobe.d/nvidia-graphics-drivers.conf has `alias nouveau off`;
+   needs `modprobe -C /dev/null nouveau` (root-owned script, user to edit).
+   Restored with gpu-to-nvidia.sh (nvidia-powerd left stopped).
