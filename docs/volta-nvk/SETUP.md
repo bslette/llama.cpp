@@ -28,3 +28,11 @@ GH_CONFIG_DIR=/home/slettela/.config/gh git -c credential.helper= \
   -c 'credential.helper=!/usr/bin/gh auth git-credential' push fork volta-nvk
 ```
 Commits are authored `bslette <bslettela@gmail.com>`.
+
+## Boot stack (since 2026-10-24)
+The board boots the r35 UEFI chain, not cboot: see `../uefi-r35/README.md`. Slots switch
+through SMD, which AndroidLauncher applies: from Android the boot HAL
+(`service call android.hardware.boot.IBootControl/default 9 i32 <slot>; reboot`), from
+Linux on slot b `smd-slot set-active a && reboot`. The cboot fastboot route
+(`--reboot-argument=bootloader`) is gone. `flash-slotb.sh` writes uncompressed kernels;
+under Android push the images and run `write.sh` as root over serial.

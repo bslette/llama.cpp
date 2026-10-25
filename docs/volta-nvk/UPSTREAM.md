@@ -40,6 +40,22 @@ merge request opened yet.
 | Distro NVK (Mesa 26.0.8) loses the device on llama.cpp iq1_m MMVQ on Ampere too (RTX 3050) | Mesa `6656192` (IDP.4A immediate) fixes it | adds weight to sending the Mesa fix |
 | Volta f16 GEMM path, int8 coopmat probe | `b4bb19c`, `005a3a5` | **needs work**: depends on Mesa Volta coopmat landing |
 
+## Rebase check (2026-10-25)
+
+Against llama.cpp master 74bca3950 and Mesa main 02f13375 (trial cherry-picks):
+
+- Still unfixed upstream: NAK IDP.4A immediate (`OpIDp4` legalize still allows an
+  immediate src1); CUDA `volta_mma_available` (still `== GGML_CUDA_CC_VOLTA`).
+- Upstream has not touched the rope/rms_norm/MMVQ/dequant shaders since b76b133,
+  but our sets depend on each other: only `ad1c0b8` picks cleanly. rope
+  (`cdaf6ad` sits on the reverted `7a97fe3`), rms_norm (`3a76e85`), MMVQ vector
+  loads (`39da5ea`, sits on `ad1c0b8`), `854e05d` and `7503f0d` conflict: extract
+  each as one squashed diff of its final file state instead of cherry-picking.
+- The whole-tile MUL_MAT test loop is ours (added in `b4bb19c`); upstream has no
+  such cases, so the tests-only PR adds the whole loop.
+- Mesa: `1e32f0c`, `6e44b0e` and the nir_lower_explicit_io set pick cleanly;
+  `7ebf5a5` (sm70.rs) and `b1f2df0` (scheduler) conflict.
+
 ## Local / board (not upstream, keep in mind)
 
 - The 6.18 and L4T kernels never mark slot b as successfully booted, so
