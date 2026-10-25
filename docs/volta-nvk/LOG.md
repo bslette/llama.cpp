@@ -1048,3 +1048,26 @@ Runner ~/xval/xval-m.sh (copy in experiments/xval).
      5368/5368; pp512 TinyLlama Q4_0 FA 3829 vs 3759 t/s (within ~2%).
    - iq1_m: main loses the device, main-fixed (with the IDP.4A fix) 49/49.
    1e32f0c: no regression on Ampere either. Card back on the NVIDIA driver.
+
+## 2026-10-25 (later): IDP.4A fix rebased for the MR
+
+`nak-idp4a-imm` on the fdo fork had a web-UI merge of main (889b305ef87).
+Rebuilt linear on mesa main e7371b0711b, fix first, both with commit bodies:
+8b1aed83c81 (nak: never encode IDP.4A with an immediate source),
+1d73194871f (nak/hw_tests: test IDP4 with an immediate source); same tree
+as the merge. Force-pushed (with lease) to the fork.
+
+NVK from 1d73194871f (stealth ~/nvk-check/bidp, build-idp.sh), full suites
+with iq1_m (experiments/xval/nvk-idp.sh):
+
+| | RTX 4060 (AD107) | RTX 3050 (GA107) |
+|---|---|---|
+| MUL_MAT iq1_m | 49/49 | 49/49 |
+| MUL_MAT_ID iq1_m | 4/4 | 4/4 |
+| MUL_MAT | 2275/2275 | 2275/2275 |
+| MUL_MAT_ID | 1109/1109 | 1109/1109 |
+| FLASH_ATTN_EXT | 5368/5368 | 5368/5368 |
+| pp512 TinyLlama Q4_0 FA | 6781 t/s | 3768 t/s |
+
+Not run on RADV/ANV: the change is only in src/nouveau/compiler/nak.
+Both cards back on the NVIDIA driver.

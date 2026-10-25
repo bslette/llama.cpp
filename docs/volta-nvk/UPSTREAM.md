@@ -6,12 +6,12 @@ splitting or more testing first; **report** = file an issue, no fix yet.
 ## Mesa (gitlab.freedesktop.org/mesa/mesa)
 
 Fork: https://gitlab.freedesktop.org/bslette/mesa (created 2026-10-21 with glab
-on stealth, logged in as bslette). Branch `nak-idp4a-imm` is pushed there; no
-merge request opened yet.
+on stealth, logged in as bslette). Branch `nak-idp4a-imm` (8b1aed83c81, 1d73194871f on main e7371b0711b,
+2026-10-25) is pushed there; the user is opening the MR.
 
 | Issue | Fix | Status |
 |---|---|---|
-| NAK encodes IDP.4A with an immediate source (opcode 0x826). No such form exists, so it traps with ILLEGAL_INSTR_ENCODING on SM72 and nvdisasm rejects it on SM72/75/86. Hit by llama.cpp iq1_m `dp4a(x, 0x01010101)` | `6656192`; on main as `nak-idp4a-imm` (2 commits incl. hw test), pushed to the fdo fork | **ready**: open the MR. Still unfixed on main 02f13375 (2026-10-25): every iq1_m MUL_MAT/MUL_MAT_ID case loses the device on Ada (RTX 4060) and Ampere (RTX 3050) |
+| NAK encodes IDP.4A with an immediate source (opcode 0x826). No such form exists, so it traps with ILLEGAL_INSTR_ENCODING on SM72 and nvdisasm rejects it on SM72/75/86. Hit by llama.cpp iq1_m `dp4a(x, 0x01010101)` | `6656192`; on main as `nak-idp4a-imm` (8b1aed83c81 + hw test 1d73194871f), pushed to the fdo fork; NVK full suites pass with it on RTX 4060 and RTX 3050 | **ready**: open the MR. Still unfixed on main 02f13375 (2026-10-25): every iq1_m MUL_MAT/MUL_MAT_ID case loses the device on Ada (RTX 4060) and Ampere (RTX 3050) |
 | NAK puts only 1 stall cycle after BRA/BSYNC/EXIT/CALL/RET/BAR on Volta, where ptxas always uses ≥5 (≥4 after WARPSYNC). One warp occasionally never finishes, giving a job timeout (6/30 runs of k=129 permuted mat-vec) | `7ebf5a5` | **ready** (rebase onto main) |
 | NAK pre-RA scheduler chains read-only (`MemOrder::Constant`) loads with other memory ops, and costs global loads at 32 cycles | `b1f2df0` | **needs work**: measure on Turing+ too; the latency value is a heuristic |
 | NAK RA: loop-header phis of vector values (HMMA accumulators) don't see later-block vector uses, so they get misaligned and copied every iteration | `6e44b0e` | **needs work**: rebase, run shader-db |
