@@ -1,0 +1,30 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+
+layout(local_size_x = 64) in;
+
+layout(binding = 0) readonly buffer In { ivec4 v[]; } inp;   // a, b, c, n
+layout(binding = 1) writeonly buffer Out { ivec4 r[]; } outp;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    ivec4 x = inp.v[i];
+    int a = x.x, b = x.y, c = x.z;
+
+    // single saturating ops, signed and mixed
+    int s = dotPacked4x8AccSatEXT(a, b, c);
+    int m = dotPacked4x8AccSatEXT(a, uint(b), c);
+
+    // accumulate the same dot product n times (bounds shared across the chain)
+    int acc = c;
+    for (int k = 0; k < x.w; k++)
+        acc = dotPacked4x8AccSatEXT(a, b, acc);
+
+    // dot product with varying sources inside the chain
+    int acc2 = c;
+    for (int k = 0; k < x.w; k++)
+        acc2 = dotPacked4x8AccSatEXT(a + k, b ^ (k * 0x01010101), acc2);
+
+    outp.r[i] = ivec4(s, m, acc, acc2);
+}

@@ -1082,3 +1082,32 @@ sources only. The gap is `dotPacked4x8AccSatEXT`: NAK lowers
 sdot_4x8_iadd_sat to idp4 + isetp/sel x3 (7 instructions, one chain). A
 cheaper saturating lowering is a follow-up candidate (NEXT). Reply draft:
 mr/mesa-nak-idp4a-imm-reply-vkpeak.md.
+
+## 2026-10-25 (later): cheaper saturating dot lowering in NAK
+
+`lower_iadd_sat: true // TODO` in NAK, so sdot_4x8_iadd_sat became
+idp4 + 3x isetp + 3x sel on the accumulator chain. The ALU pipe (half rate)
+was the limit: ~3.5 T ALU ops/s / 6 = ~590 G dots/s = the 4733 GIOPS.
+
+New lowering (late NAK algebraic, sm >= 73, has_sdot_4x8_sat and
+has_sudot_4x8_sat set): sdot(a, b, clamp(c, INT_MIN - min(d,0),
+INT_MAX - max(d,0))) with d = sdot(a, b, 0); exact for any d. Chain is
+imnmx, imnmx, idp; bounds are CSE'd when the same dot repeats. Volta keeps
+the old path (no IMNMX). Branch nak-sdot-sat on main e7371b0711b,
+599550ab4c3 (stealth ~/nvk-check/msat, build-sat.sh), local only.
+
+Tests (experiments/satdot): satdot = 262144 random cases x {signed, mixed,
+repeated chain, varying chain}, accumulators near INT_MAX/INT_MIN, CPU
+reference (passes on NVIDIA 615.78 and ANV first). satbench = timed, sources
+change every step (b += acc), mode 1 = non-saturating reference.
+
+| | RTX 4060 old | new | RTX 3050 old | new |
+|---|---|---|---|---|
+| satdot mismatches | 0 | 0 | 0 | 0 |
+| vkpeak int8-dotprod (GIOPS) | 4731 | 11078 | 2768 | 6256 |
+| satbench sat, G dots/s | 373-393 | 356-390 | 234-239 | 235-239 |
+
+NVIDIA 615.78 on the 4060: 7199 GIOPS. Varying-source case is neutral
+(paired runs -4..0%, clock drift dominates). Possible further step: a
+predicated IMNMX (min or max picked by d >= 0) would make the
+varying case 4 ALU instead of 6, needs a from_nir pattern.

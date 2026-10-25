@@ -1,0 +1,29 @@
+#version 450
+#extension GL_EXT_integer_dot_product : require
+
+// Saturating dot products whose sources change every step, so the clamp
+// bounds can't be shared. MODE 0: dotPacked4x8AccSatEXT, MODE 1: the
+// non-saturating dotPacked4x8EXT + add, for reference.
+layout(local_size_x = 256) in;
+layout(constant_id = 0) const int MODE = 0;
+
+layout(binding = 1) writeonly buffer Out { int r[]; } outp;
+
+void main()
+{
+    uint gx = gl_GlobalInvocationID.x;
+    int a = int(gx * 0x9e3779b9u), b = int(gx * 0x85ebca6bu);
+    int acc0 = int(gx), acc1 = int(gx) ^ 0x55555555;
+    for (int k = 0; k < 1024; k++) {
+        if (MODE == 0) {
+            acc0 = dotPacked4x8AccSatEXT(a, b, acc0);
+            acc1 = dotPacked4x8AccSatEXT(b, a ^ k, acc1);
+        } else {
+            acc0 += dotPacked4x8EXT(a, b);
+            acc1 += dotPacked4x8EXT(b, a ^ k);
+        }
+        a += 0x01030507;
+        b += acc0;
+    }
+    outp.r[gx] = acc0 + acc1;
+}
