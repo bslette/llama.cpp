@@ -1094,7 +1094,7 @@ has_sudot_4x8_sat set): sdot(a, b, clamp(c, INT_MIN - min(d,0),
 INT_MAX - max(d,0))) with d = sdot(a, b, 0); exact for any d. Chain is
 imnmx, imnmx, idp; bounds are CSE'd when the same dot repeats. Volta keeps
 the old path (no IMNMX). Branch nak-sdot-sat on main e7371b0711b,
-599550ab4c3 (stealth ~/nvk-check/msat, build-sat.sh), local only.
+599550ab4c3 (stealth ~/nvk-check/msat, build-sat.sh), pushed to the fdo fork.
 
 Tests (experiments/satdot): satdot = 262144 random cases x {signed, mixed,
 repeated chain, varying chain}, accumulators near INT_MAX/INT_MIN, CPU
