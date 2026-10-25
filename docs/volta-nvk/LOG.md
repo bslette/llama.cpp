@@ -1004,3 +1004,28 @@ Clips: the 1080p source upscaled to 3840x2160, 120 frames at 60 fps, x264 High
 - Encoder 4K: MediaCodec NV12 3840x2160 at 40 Mbit/s 56.5 dB, 23 fps through
   mcenc (its CPU copy of the input is part of that); screenrecord --size
   3840x2160 works (RGBA via VIC, level 5.2).
+
+## 2026-10-25: upstream low-hanging fruit, round 1 (cross-GPU)
+
+Trees on llama.cpp master 74bca3950 (stealth ~/xval/{m0,t1,g1}, built with
+xval-build2.sh: xval-build.sh died under pipefail on `glslc --version | head`).
+Runner ~/xval/xval-m.sh (copy in experiments/xval).
+
+1. Whole-tile MUL_MAT tests (branch `test-whole-tile-mulmat` 1fd4708a7 on the
+   fork: 3 shapes x 20 quantized types, placed with the other MUL_MAT cases):
+   60/60 pass on RX 7800 XT (RADV), RX 5700 XT (RADV), RTX 4060 (NVIDIA),
+   UHD 770 (ANV), RTX 3050 (NVIDIA), Iris Xe (ANV). Not run on CUDA.
+2. `ad1c0b8` MMVQ row groups forced on (GGML_VK_MMVQ_ROW_GROUPS, experiment
+   branch mmvq-row-groups-exp, local): MUL_MAT/MUL_MAT_ID n=1..8 all pass
+   everywhere with 4 groups. Speed, 4096x14336 kernels: q4_0 and iq4_xs with
+   2-4 columns 20-40% faster on RDNA3, Ada and Ampere (NVIDIA driver); q8_0
+   2-17% slower there (RDNA3 n=1 with 4 groups +28%); Intel unchanged except
+   iq4_xs n=2. Token generation (tg128, TinyLlama Q4_0/Q8_0/Q4_K_M/IQ4_XS):
+   within noise on all of them. Decision: keep it gated to NVK Volta; a later
+   option is 2 row groups for n>=2 on q4_0/iq4_xs-like types only.
+3. Mesa `1e32f0c` (cmat_muladd size): branch nak-cmat-muladd-size on main
+   (stealth ~/nvk-check/m1e32), NVK builds with and without it in bazzite
+   ~/nvk-check/icd-1e32-{main,fix}. Not run: the RTX 4060 can only go to
+   nouveau with the Plasma session logged out (kwin holds /dev/nvidia0);
+   gpu-to-nouveau.sh had already stopped cardwired/nvidia-powerd/persistenced,
+   restored with gpu-to-nvidia.sh.
