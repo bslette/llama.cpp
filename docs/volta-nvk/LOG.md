@@ -1139,3 +1139,26 @@ Final branch nak-sdot-sat a1d05768327 (both rules, rebased on main
 (0 mismatches, vkpeak 6326, satbench 240-244 = baseline; the first run after
 the driver switch is slow for whichever build runs first). MR description:
 mr/mesa-nak-sdot-sat.md. Board tree restored to e943159 and rebuilt.
+
+## 2026-10-25 (later): nouveau runtime PM on the RTX 4060 (keep-awake repro)
+
+Goal: reproduce "after runtime suspend every job times out" (2026-10-21) and
+find/make a keep-awake. nouveau runpm defaults to on for this Optimus laptop;
+the GPU reaches D3cold (root port 00:01.0 too) ~6 s after the last ioctl.
+
+- Fresh process from D3cold, 6 cycles: satdot correct, 3.0 s each.
+- Same process, idle 15 s (suspends with the device open), 3 rounds:
+  experiments/runpm/rpmtest.c (inputs only in VRAM + 2 GiB ballast filled per
+  1 MiB chunk): 0 compute mismatches, 2048/2048 chunks intact, each first
+  submit after resume takes ~1.66 s (resume cost).
+- llama-bench TinyLlama from D3cold, 3 runs: normal (pp512 ~6500, tg32 ~238).
+- No kernel errors in any of it. Not reproducible now; the original was on
+  bazzite 44.20261013 (same kernel 7.2.9-ogc, linux-firmware 20260916 vs
+  20261019 now; AD107 GSP 570.144 loaded from /var/home/slettela/nouveau-fw).
+- `exec 9</dev/dri/renderD*` does not prevent runtime suspend (suspended 12 s
+  after open). It only woke the GPU at open. The "first run after a driver
+  switch is slow" effect seen in the benchmarks is this ~1.7 s resume.
+
+Keep-awake options: `echo on > /sys/bus/pci/devices/0000:01:00.0/power/control`
+(standard PCI runtime PM, root; `auto` to undo) or `modprobe nouveau runpm=0`.
+nouveau has no per-client keep-awake.

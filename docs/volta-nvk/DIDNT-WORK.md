@@ -83,7 +83,11 @@ Keep every failed attempt here with the reason, so it isn't repeated.
 - rms_norm: pinning the subgroup size was not what made RDNA3 slower (19.3 vs
   19.3 us with the pin Intel-only); the register cache of the row was.
 - nouveau on an Ada laptop GPU: after runtime suspend/resume every job timed
-  out. Keep a DRM client open (render node fd) for the whole benchmark.
+  out (2026-10-21, bazzite 44.20261013). Holding the render node fd open does
+  NOT keep the GPU awake (checked 2026-10-25: it suspends 12 s after open with
+  the fd held); nouveau only holds a runtime-PM reference during ioctls. Not
+  reproducible on 2026-10-25 (bazzite 44.20261023, same 7.2.9-ogc kernel,
+  linux-firmware 20261019): see LOG 2026-10-25 runtime PM.
 - Trusted OS on slot b (2026-10-23, reverted, original secure-os_b restored):
   tegraflash `signwrite` signs with an empty magic id, so MB2 rejects the TOS;
   single-partition `write` does not erase QSPI (result = old AND new);
