@@ -1071,3 +1071,14 @@ with iq1_m (experiments/xval/nvk-idp.sh):
 
 Not run on RADV/ANV: the change is only in src/nouveau/compiler/nak.
 Both cards back on the NVIDIA driver.
+
+## 2026-10-25 (later): vkpeak int8-dotprod on NVK (MR question)
+
+Reviewer asked whether the IDP.4A fix speeds up vkpeak int8-dotprod. vkpeak
+f37dab4 (built in ubuntu:24.04 on stealth ~/vkpeak-src, binary bazzite
+~/vkpeak), RTX 4060: NVK main 02f13375 4733 GIOPS, NVK with the fix 4730,
+NVIDIA 615.78.08 7199 (int32-vec4 7474). No change: the shader has register
+sources only. The gap is `dotPacked4x8AccSatEXT`: NAK lowers
+sdot_4x8_iadd_sat to idp4 + isetp/sel x3 (7 instructions, one chain). A
+cheaper saturating lowering is a follow-up candidate (NEXT). Reply draft:
+mr/mesa-nak-idp4a-imm-reply-vkpeak.md.
