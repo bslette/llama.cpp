@@ -28,3 +28,24 @@ r4 = sel p0 r6 r5
 NVK is measuring that sequence rather than IDP throughput. A cheaper lowering
 of the saturating form, or a native one if the hardware has it, would be the
 thing that moves it.
+
+Follow-up: I tried a cheaper lowering. Clamp the accumulator first, then let
+IDP do the add, which can then no longer overflow:
+
+    sat(c + d) = clamp(c, INT_MIN - min(d, 0), INT_MAX - max(d, 0)) + d,   d = idp(a, b, 0)
+
+It's exact for any d, and the bounds only depend on the dot product, so the
+accumulator chain becomes IMNMX, IMNMX, IDP. It's a late NAK algebraic rule
+for SM73+ (Volta has no IMNMX), with `has_sdot_4x8_sat`/`has_sudot_4x8_sat`
+set so the op gets that far.
+
+| vkpeak int8-dotprod (GIOPS) | before | after |
+|---|---|---|
+| RTX 4060 Laptop (AD107) | 4731 | 11078 |
+| RTX 3050 (GA107) | 2768 | 6256 |
+
+The NVIDIA driver on the same 4060 gets 7199. When the sources change every
+step, so the bounds can't be shared, throughput is unchanged (within noise).
+A 262144-case test against a CPU reference (signed and mixed-sign,
+accumulators near INT_MAX/INT_MIN, repeated and varying chains) passes. I can
+put it up as a separate MR.
