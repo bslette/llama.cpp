@@ -1045,7 +1045,7 @@ std::unique_ptr<vk_queue> ggml_vk_create_queue(vk_device& device, uint32_t queue
     h->queue = device->device.getQueue2(queue_info2);
     h->device = device;
     // Avoid concurrent submissions on NVIDIA due to driver bug.
-    if ((device->vendor_id == VK_VENDOR_ID_NVIDIA && !getenv("GGML_VK_NO_CM1_INT"))) {
+    if (device->vendor_id == VK_VENDOR_ID_NVIDIA) {
         h->device_submit_mutex = &device->queue_submit_mutex;
     }
     q->handle = h;
@@ -1678,6 +1678,12 @@ static bool ggml_vk_fa_scalar_uses_mmq(const vk_device& device, ggml_type k_type
 #endif
 }
 
+// int8 coopmat MMQ on NVIDIA only for Volta under NVK (Xavier); on Turing and newer the f16 coopmat matmul is about 2x faster for K-quants
+static bool ggml_vk_cm1_int_nvk_volta(const vk_device& device) {
+    return device->vendor_id == VK_VENDOR_ID_NVIDIA && device->driver_id == vk::DriverId::eMesaNvk &&
+           strstr(device->properties.deviceName, " GV1") != nullptr && !getenv("GGML_VK_NO_CM1_INT");
+}
+
 void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
     VK_LOG_DEBUG("ggml_vk_load_shaders(" << device->name << ")");
 
@@ -1878,10 +1884,10 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
             }
         }
 
-        // Other devices get the element layout probed in the shader (mul_mmq_cm1.comp).
+        // Volta under NVK gets the element layout probed in the shader (mul_mmq_cm1.comp).
         const bool use_cm1_int = device->coopmat_int_support &&
                                  (device->architecture == AMD_RDNA3 || device->architecture == AMD_RDNA4 ||
-                                  (device->vendor_id == VK_VENDOR_ID_NVIDIA && !getenv("GGML_VK_NO_CM1_INT")));
+                                  ggml_vk_cm1_int_nvk_volta(device));
 
         for (uint32_t i = 0; i < GGML_TYPE_COUNT; ++i) {
             ggml_type t = (ggml_type)i;
@@ -2488,7 +2494,7 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
         }
 #undef X_CM1
 
-        if (device->coopmat_int_support && (rdna3 || rdna4 || (device->vendor_id == VK_VENDOR_ID_NVIDIA && !getenv("GGML_VK_NO_CM1_INT")))) {
+        if (device->coopmat_int_support && (rdna3 || rdna4 || ggml_vk_cm1_int_nvk_volta(device))) {
             cm1_create_mmq({GGML_TYPE_Q4_0,   GGML_TYPE_Q8_1, false, false}, tc_mmq_cm1_int,   "matmul_q4_0_q8_1",   matmul_q4_0_q8_1_cm1_len,   matmul_q4_0_q8_1_cm1_data,   sizeof(vk_mat_mat_push_constants), 3);
             if (!rdna4) { cm1_create_mmq({GGML_TYPE_Q4_1, GGML_TYPE_Q8_1, false, false}, tc_mmq_cm1_int,   "matmul_q4_1_q8_1",   matmul_q4_1_q8_1_cm1_len,   matmul_q4_1_q8_1_cm1_data,   sizeof(vk_mat_mat_push_constants), 3); }
             cm1_create_mmq({GGML_TYPE_Q5_0,   GGML_TYPE_Q8_1, false, false}, tc_mmq_cm1_int,   "matmul_q5_0_q8_1",   matmul_q5_0_q8_1_cm1_len,   matmul_q5_0_q8_1_cm1_data,   sizeof(vk_mat_mat_push_constants), 3);
@@ -2561,7 +2567,7 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
         }
 #undef X_CM1_ID
 
-        if (device->coopmat_int_support && (rdna3 || rdna4 || (device->vendor_id == VK_VENDOR_ID_NVIDIA && !getenv("GGML_VK_NO_CM1_INT")))) {
+        if (device->coopmat_int_support && (rdna3 || rdna4 || ggml_vk_cm1_int_nvk_volta(device))) {
             cm1_create_mmq({GGML_TYPE_Q4_0,   GGML_TYPE_Q8_1, true, false}, tc_mmq_cm1_int,   "matmul_id_subgroup_q4_0_q8_1",   matmul_id_subgroup_q4_0_q8_1_cm1_len,   matmul_id_subgroup_q4_0_q8_1_cm1_data,   sizeof(vk_mat_mat_id_push_constants), mul_mat_id_param_count);
             cm1_create_mmq({GGML_TYPE_Q4_1,   GGML_TYPE_Q8_1, true, false}, tc_mmq_cm1_int,   "matmul_id_subgroup_q4_1_q8_1",   matmul_id_subgroup_q4_1_q8_1_cm1_len,   matmul_id_subgroup_q4_1_q8_1_cm1_data,   sizeof(vk_mat_mat_id_push_constants), mul_mat_id_param_count);
             cm1_create_mmq({GGML_TYPE_Q5_0,   GGML_TYPE_Q8_1, true, false}, tc_mmq_cm1_int,   "matmul_id_subgroup_q5_0_q8_1",   matmul_id_subgroup_q5_0_q8_1_cm1_len,   matmul_id_subgroup_q5_0_q8_1_cm1_data,   sizeof(vk_mat_mat_id_push_constants), mul_mat_id_param_count);
