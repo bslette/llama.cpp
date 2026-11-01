@@ -1320,6 +1320,14 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
     } else if (ggml_is_quantized(k_type) || ggml_is_quantized(v_type) || hsk >= 256 || hsv >= 256) {
         result.block_rows = (hsk >= 512 || hsv >= 512) ? 32 : 64;
         result.block_cols = 32;
+        // NVK: narrower blocks keep the 256-wide rows in registers (hsk=256 prompt FA ~-40%)
+        if (device->driver_id == vk::DriverId::eMesaNvk && result.block_rows == 64 && (hsk >= 256 || hsv >= 256)) {
+            result.block_cols = 16;
+        }
+    } else if (device->driver_id == vk::DriverId::eMesaNvk) {
+        // 64x64 spills on NVK, 64x32 does not (hsk=128 prompt FA ~-25%)
+        result.block_rows = 64;
+        result.block_cols = 32;
     } else {
         result.block_rows = 64;
         result.block_cols = 64;

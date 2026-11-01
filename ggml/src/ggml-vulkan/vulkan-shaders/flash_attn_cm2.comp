@@ -355,11 +355,31 @@ void main() {
     uint32_t mask_opt = 0;
     uint32_t mask_opt_idx = ~0;
 
+// Profiling experiment, off by default. Bits remove one part of the loop, to see how much time it takes:
+//   1 = K and V loaded once before the loop, 2 = no softmax (P = S), 4 = no mask, 8 = no "mask all -inf" skip check, 16 = mask loaded but not added
+// Results are wrong when it is not 0. Use -DFA_EXPERIMENT=N or edit the default below.
+// Result on RTX 4060 + NVK (FA hsk=128 nh=8 nr23=[4,1] kv=4096 nb=4096, ms; NVIDIA driver 12.5 for the full run):
+//   2026-11-01, 64x64 tiles, 255 GPRs + 521 spills: full 63, no softmax 42-47, no mask 39, no mask + no softmax 29, no all -inf check 57, no mask add 46.
+//     -> per-row L/M kept as Br x Bc matrices and a live ALiBi slope matrix used the registers (fixed with RowTileCols).
+//   2026-11-01, after that fix: full 33.3, no softmax 30.2, no mask 26.2, no mask add 30.2, no mask + no softmax 25.0, K/V once 42.6.
+//     -> mask and softmax are now small; holding K/V across the loop costs more registers than it saves loads.
+//        V was filled into shared memory element by element (2 byte loads per value) because NAK staged every B matrix
+//        column-major; NAK now stages untransposed B row-major. With that and 64x32 tiles on NVK: full 21.3.
+#ifndef FA_EXPERIMENT
+#define FA_EXPERIMENT 0
+#endif
+#if (FA_EXPERIMENT & 1)
+    coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, HSK_pad, Bc, gl_MatrixUseB> xK_T;
+    coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Bc, HSV_pad, gl_MatrixUseB> xV;
+    coopMatLoadTensorNV(xK_T, data_k, ik2*p.nb12 + ik3*p.nb13, sliceTensorLayoutNV(tensorLayoutK, start_j * Bc, Bc, 0, HSK_pad), tensorViewTranspose);
+    coopMatLoadTensorNV(xV, data_v, iv2*p.nb22 + iv3*p.nb23, sliceTensorLayoutNV(tensorLayoutV, start_j * Bc, Bc, 0, HSV_pad));
+#endif
+
     [[dont_unroll]]
     for (uint32_t j = start_j; j < end_j; ++j) {
 
         coopmat<float16_t, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator> mv = coopmat<float16_t, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator>(0);
-        if (MASK_ENABLE && !USE_SPARSE) {
+        if (MASK_ENABLE && !USE_SPARSE && (FA_EXPERIMENT & 4) == 0) {
 
             if (USE_MASK_OPT && mask_opt_idx != j / 16) {
                 mask_opt_idx = j / 16;
@@ -384,10 +404,12 @@ void main() {
 
                     coopMatLoadTensorNV(mv, data_m, m_offset, sliceTensorLayoutNV(tensorLayoutM, i * Br, Br, j * Bc, Bc));
                     // skip the block if the mask is entirely -inf
+#if (FA_EXPERIMENT & 8) == 0
                     coopMatReduceNV(mvmax, mv, gl_CooperativeMatrixReduceRowAndColumnNV, maxReduceFp16);
                     if (mvmax[0] <= NEG_FLT_MAX_OVER_2) {
                         continue;
                     }
+#endif
                 } else {
                     tensorLayoutNV<2, Clamp> tensorLayoutM = createTensorLayoutNV(2, Clamp);
                     // Don't clamp against nem1 when GQA is enabled
@@ -399,10 +421,12 @@ void main() {
 
                     coopMatLoadTensorNV(mv, data_m, m_offset, sliceTensorLayoutNV(tensorLayoutM, i * Br, Br, j * Bc, Bc));
                     // skip the block if the mask is entirely -inf
+#if (FA_EXPERIMENT & 8) == 0
                     coopMatReduceNV(mvmax, mv, gl_CooperativeMatrixReduceRowAndColumnNV, maxReduceFp16);
                     if (mvmax[0] <= NEG_FLT_MAX_OVER_2) {
                         continue;
                     }
+#endif
                 }
             }
         }
@@ -413,7 +437,11 @@ void main() {
 
         uint32_t k_offset = ik2*p.nb12 + ik3*p.nb13;
         // F16: bs_k==1 (direct load). F32: bs_k==4 (vec4 / dequantFuncF32). Quantized types: bs_k==32.
-        if (USE_SPARSE) {
+        if ((FA_EXPERIMENT & 1) != 0) {
+#if (FA_EXPERIMENT & 1)
+            K_T = xK_T;
+#endif
+        } else if (USE_SPARSE) {
             coopMatLoadTensorNV(K_T, data_k, k_offset, sliceTensorLayoutNV(tensorLayoutK, j * Bc, Bc, 0, HSK_pad), tensorViewTranspose FAGATHERK);
 #if !defined(BFLOAT16)
         } else if (USE_DECODE_K) {
@@ -433,7 +461,7 @@ void main() {
 
         if (MASK_ENABLE && USE_SPARSE) {
             coopMatPerElementNV(S, S, faAddSparseMask, j);
-        } else if (MASK_ENABLE) {
+        } else if (MASK_ENABLE && (FA_EXPERIMENT & 16) == 0) {
             coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator> mvf = coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator>(mv);
             // ALiBi
             if (p.max_bias > 0.0f) {
@@ -456,6 +484,10 @@ void main() {
         coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator> P;
         coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bl, gl_MatrixUseAccumulator> rowmax, rowsum, eM;
 
+#if (FA_EXPERIMENT & 2)
+        P = S;
+        eM = coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bl, gl_MatrixUseAccumulator>(1.0);
+#else
         coopMatReduceNV(rowmax, S, gl_CooperativeMatrixReduceRowNV, maxReduce);
 
         rowmax += coopmat<ACC_TYPE, gl_ScopeWorkgroup, Br, Bl, gl_MatrixUseAccumulator>(FATTN_KQ_MAX_OFFSET);
@@ -470,6 +502,7 @@ void main() {
         coopMatReduceNV(Mwide, M, gl_CooperativeMatrixReduceRowNV, smearReduce);
         coopMatPerElementNV(P, S - Mwide, Exp);
         coopMatPerElementNV(eM, Mold - M, Exp);
+#endif
 
         // Clear padding elements to 0, so they don't contribute to rowsum
         if (Clamp != 0 &&
@@ -492,7 +525,11 @@ void main() {
 
         coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Bc, HSV_pad, gl_MatrixUseB> V;
         uint32_t v_offset = iv2*p.nb22 + iv3*p.nb23;
-        if (USE_SPARSE) {
+        if ((FA_EXPERIMENT & 1) != 0) {
+#if (FA_EXPERIMENT & 1)
+            V = xV;
+#endif
+        } else if (USE_SPARSE) {
             coopMatLoadTensorNV(V, data_v, v_offset, sliceTensorLayoutNV(tensorLayoutV, j * Bc, Bc, 0, HSV_pad) FAGATHERV);
 #if !defined(BFLOAT16)
         } else if (USE_DECODE_V) {
