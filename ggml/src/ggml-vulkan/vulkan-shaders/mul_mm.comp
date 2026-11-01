@@ -1,5 +1,19 @@
 #version 450
 
+// Profiling experiment, off by default. It splits matmul time into load and math parts.
+//   0 = normal
+//   1 = global->shared loads only on the first K block, so the time left is the MMA work
+//   2 = MMAs only on the first K block, so the time left is the load work
+// Results are wrong when it is not 0. Build with it set and time MUL_MAT with test-backend-ops perf.
+// Theory: if loads + MMA add up to much more than the full run, the shader does not overlap them.
+// Result on RTX 4060 + NVK (coopmat1, MUL_MAT 4096x512x14336, us, 2026-10-30):
+//   full: f16 5760, q4_0 3890, q4_K 5490
+//   1 (MMA only): f16 1405, q4_0 1540, q4_K 1420
+//   2 (loads only): f16 5140, q4_0 3210, q4_K 4940
+// So the loads took almost all the time. NAK was the cause: its scheduler put the global loads in a chain (one load, one wait),
+// and robust buffer access split vector loads into one load per element (fixed in Mesa NAK commits 5bcfd26 and 7880617).
+#define MM_EXPERIMENT 0
+
 #extension GL_EXT_control_flow_attributes : enable
 #extension GL_EXT_shader_16bit_storage : require
 
@@ -339,6 +353,9 @@ void main() {
 #endif
 
     for (uint block = start_k; block < end_k; block += BK) {
+#if MM_EXPERIMENT == 1
+        if (block == start_k) {
+#endif
         [[unroll]] for (uint l = 0; l < BM; l += loadstride_a) {
             load_a_to_shmem(pos_a, loadr_a, loadc_a + l, ir * BM + loadc_a + l, block, end_k);
         }
@@ -355,6 +372,9 @@ void main() {
         #ifdef MUL_MAT_ID
         }
         #endif
+#if MM_EXPERIMENT == 1
+        }
+#endif
 
         barrier();
 
@@ -364,6 +384,9 @@ void main() {
 #ifdef COOPMAT
 #ifdef MUL_MAT_ID
         if (warp_c < required_warp_c) {
+#endif
+#if MM_EXPERIMENT == 2
+        if (block == start_k)
 #endif
         [[unroll]] for (uint i = 0; i < BK; i += TK) {
             [[unroll]] for (uint cm_row = 0; cm_row < cms_per_row; cm_row++) {

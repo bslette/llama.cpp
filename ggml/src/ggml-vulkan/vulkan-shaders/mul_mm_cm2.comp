@@ -513,6 +513,25 @@ void main() {
             return;
         } else {
             coopmat<ACC_TYPE, gl_ScopeWorkgroup, BM, BN, gl_MatrixUseAccumulator> sum = coopmat<ACC_TYPE, gl_ScopeWorkgroup, BM, BN, gl_MatrixUseAccumulator>(0.0);
+// Profiling experiment, off by default. It does the same split as MM_EXPERIMENT in mul_mm.comp, for coopmat2.
+//   1 = load A/B once, then multiply every K block (time = MMA work)
+//   2 = load every K block, but multiply only once (time = load and decode work)
+// Results are wrong when it is not 0. Use -DCM2_EXPERIMENT=N or edit the default below.
+// Compare against the NVIDIA driver with the same build to see how much of each part a driver overlaps.
+// Result on RTX 4060 (f16 MUL_MAT 4096x512x14336, us, 2026-10-31):
+//   NVIDIA: MMA 1276, loads 1200, full 1677 (the parts overlap)
+//   NVK:    MMA 1347, loads 3984, full 4161 (loads dominate and do not overlap)
+// NVIDIA's code stages A and B in shared memory and issues the next tile's global loads right after the barrier.
+// The NVK coopmat2 lowering was changed to do the same; f16 went to 1935 us.
+#ifndef CM2_EXPERIMENT
+#define CM2_EXPERIMENT 0
+#endif
+#if CM2_EXPERIMENT == 1
+            coopmat<MAT_TYPE, gl_ScopeWorkgroup, BM, BK, gl_MatrixUseA> xmat_a;
+            coopmat<MAT_TYPE, gl_ScopeWorkgroup, BK, BN, gl_MatrixUseB> xmat_b;
+            coopMatLoadTensorNV(xmat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, block_k, BK) DECODEFUNCA);
+            coopMatLoadTensorNV(xmat_b, data_b, pos_b, sliceTensorLayoutNV(tensorLayoutB, ic * BN, BN, block_k, BK), tensorViewTranspose);
+#endif
 
             for (uint i = 0; i < k_iters; ++i) {
 
@@ -523,13 +542,20 @@ void main() {
 
                 // Manually partial unroll
                 [[unroll]] for (uint j = 0; j < unroll_count; ++j) {
+#if CM2_EXPERIMENT == 1
+                    sum = coopMatMulAdd(xmat_a, xmat_b, sum);
+#else
                     coopmat<MAT_TYPE, gl_ScopeWorkgroup, BM, BK, gl_MatrixUseA> mat_a;
                     coopmat<MAT_TYPE, gl_ScopeWorkgroup, BK, BN, gl_MatrixUseB> mat_b;
 
                     coopMatLoadTensorNV(mat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, block_k, BK) DECODEFUNCA);
                     coopMatLoadTensorNV(mat_b, data_b, pos_b, sliceTensorLayoutNV(tensorLayoutB, ic * BN, BN, block_k, BK), tensorViewTranspose);
 
+#if CM2_EXPERIMENT == 2
+                    if (i == k_iters - 1 && j == 0)
+#endif
                     sum = coopMatMulAdd(mat_a, mat_b, sum);
+#endif
                     block_k += BK;
                 }
             }

@@ -2405,16 +2405,23 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
             tc_mmq_id[2] = { { 512, 128, 128, 32, 32, 32, 2, device->coopmat_m, device->coopmat_n, device->coopmat_k, 32 }, { 128, 128, 1 }, 32 };
         }
 
+        // Experiment: GGML_VK_CM1_NO_ROBUST=1 turns off robust buffer access for the coopmat1 matmuls (not MUL_MAT_ID).
+        // It is safe only when every load is in bounds. It is meant for measuring the cost of robustness in the driver.
+        // Result on RTX 4060 + NVK (MUL_MAT 4096x512x14336, us, 2026-10-30), robust -> not robust:
+        //   f16 5800 -> 5650, q4_0 3920 -> 3600, q4_K 5510 -> 5080, q6_K 7900 -> 5690
+        // The cause was NAK: it split each bounds-checked vector load into one predicated load per element.
+        // Mesa NAK commit 7880617 checks the whole vector instead, which robustBufferAccess allows.
+        const bool cm1_no_robust = getenv("GGML_VK_CM1_NO_ROBUST") != nullptr;
         auto cm1_create = [&](vk_matmul_pipeline_key key, const std::vector<vk_tile_config>& tc_base,
                               const std::string& name, size_t len, const void* data, uint32_t pc_size, uint32_t pc) {
             auto tc = filter_tc(tc_base, key.type_a, key.mul_mat_id);
-            if (!tc.empty()) create_mm_pipelines(key, tc, name, len, data, pc_size, pc, cm1_spec, false, true, 0, true, cm1_pin);
+            if (!tc.empty()) create_mm_pipelines(key, tc, name, len, data, pc_size, pc, cm1_spec, cm1_no_robust && !key.mul_mat_id, true, 0, true, cm1_pin);
         };
         auto cm1_create_quant = [&](vk_matmul_pipeline_key key, const std::vector<vk_tile_config>& tc_base,
                                     const std::string& name, size_t len, const void* data, uint32_t pc_size, uint32_t pc) {
             spec_fn_t qs = [&, type_a=key.type_a](const std::vector<uint32_t>& wt, bool a) { return ggml_vk_mul_mm_spec_quant(wt, a, (uint32_t)type_a); };
             auto tc = filter_tc(tc_base, key.type_a, key.mul_mat_id);
-            if (!tc.empty()) create_mm_pipelines(key, tc, name, len, data, pc_size, pc, qs, false, true, 0, true, cm1_pin);
+            if (!tc.empty()) create_mm_pipelines(key, tc, name, len, data, pc_size, pc, qs, cm1_no_robust && !key.mul_mat_id, true, 0, true, cm1_pin);
         };
         // int8 MMQ helper: per-type cm1 shader, warptile passed as-is (carries DEVICE_ARCH in
         // spec constant WARP_SIZE_IDX+1), subgroup size pinned to the warptile WARP element, no aligned variant.
