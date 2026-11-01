@@ -1328,6 +1328,11 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
     result.subgroup_size = device->subgroup_size;
     result.workgroup_size = (small_rows && (D % 32) == 0) ? 256 : 128;
 
+    // One 16-column tile for the per-row L/M values instead of a whole block: NVK prompt
+    // FA -45% (fewer registers, no spills on Ada). The NVIDIA driver's compiler crashes on
+    // some of these shaders (small rows with sinks) and gains nothing, so it keeps block_cols.
+    result.row_tile_cols = device->driver_id == vk::DriverId::eNvidiaProprietary ? 0 : 16;
+
     return result;
 }
 
@@ -1395,7 +1400,7 @@ vk_fa_pipeline_state get_fa_pipeline_state(const vk_device& device, const vk_fa_
 
     const uint32_t subgroup_size = params.disable_subgroups ? 0 : params.subgroup_size;
 
-    return vk_fa_pipeline_state{hsk, hsv, params.block_rows, params.block_cols, params.d_split, params.row_split, params.shmem_staging, params.path, params.workgroup_size, subgroup_size, aligned, f32acc, flags, params.limit_occupancy_shmem, k_type, v_type};
+    return vk_fa_pipeline_state{hsk, hsv, params.block_rows, params.block_cols, params.d_split, params.row_split, params.shmem_staging, params.path, params.workgroup_size, subgroup_size, aligned, f32acc, flags, params.limit_occupancy_shmem, k_type, v_type, params.row_tile_cols};
 }
 
 static uint32_t fa_block_bytes(ggml_type t) {
@@ -1423,6 +1428,7 @@ static std::vector<uint32_t> get_fa_spec_constants(const vk_fa_pipeline_state& s
         /*13 FaTypeV         */ static_cast<uint32_t>(state.v_type),
         /*14 FaBlockBytesK   */ fa_block_bytes(state.k_type),
         /*15 FaBlockBytesV   */ fa_block_bytes(state.v_type),
+        /*16 RowTileCols     */ state.row_tile_cols,
     };
 }
 
