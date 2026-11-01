@@ -3334,6 +3334,8 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
     if (sizeof(vk_op_rms_norm_mul_rope_push_constants) <= device->properties.limits.maxPushConstantsSize) {
         ggml_vk_create_pipeline(device, device->pipeline_rms_norm_mul_rope_f32_f32, "rms_norm_mul_rope_f32_f32", rms_norm_mul_rope_f32_f32_len, rms_norm_mul_rope_f32_f32_data, "main", 7, sizeof(vk_op_rms_norm_mul_rope_push_constants), {1, 1, 1}, {0, 1}, 1, true, true, device->subgroup_size);
         ggml_vk_create_pipeline(device, device->pipeline_rms_norm_mul_rope_f32_f16, "rms_norm_mul_rope_f32_f16", rms_norm_mul_rope_f32_f16_len, rms_norm_mul_rope_f32_f16_data, "main", 7, sizeof(vk_op_rms_norm_mul_rope_push_constants), {1, 1, 1}, {0, 1}, 1, true, true, device->subgroup_size);
+        ggml_vk_create_pipeline(device, device->pipeline_rms_norm_mul_rope_rows_f32_f32, "rms_norm_mul_rope_rows_f32_f32", rms_norm_mul_rope_rows_f32_f32_len, rms_norm_mul_rope_rows_f32_f32_data, "main", 7, sizeof(vk_op_rms_norm_mul_rope_push_constants), {1, 1, 1}, {0, 1}, 1, true, true, device->subgroup_size);
+        ggml_vk_create_pipeline(device, device->pipeline_rms_norm_mul_rope_rows_f32_f16, "rms_norm_mul_rope_rows_f32_f16", rms_norm_mul_rope_rows_f32_f16_len, rms_norm_mul_rope_rows_f32_f16_data, "main", 7, sizeof(vk_op_rms_norm_mul_rope_push_constants), {1, 1, 1}, {0, 1}, 1, true, true, device->subgroup_size);
     }
 
     ggml_vk_create_pipeline(device, device->pipeline_rms_norm_back_f32, "rms_norm_back_f32", rms_norm_back_f32_len, rms_norm_back_f32_data, "main", 3, sizeof(vk_op_push_constants), {1, 1, 1}, {}, 1);
@@ -11141,7 +11143,10 @@ void ggml_vk_rms_norm(ggml_backend_vk_context * ctx, vk_context& subctx, const s
         pc.bin = bin;
         pc.rope = ggml_vk_make_rope_constants(rope, rope->src[0], tensors[4] != nullptr, false, set_rows_stride);
 
-        vk_pipeline pipeline = tensors[5]->type == GGML_TYPE_F16 ? ctx->device->pipeline_rms_norm_mul_rope_f32_f16 : ctx->device->pipeline_rms_norm_mul_rope_f32_f32;
+        const bool rows = ctx->device->rms_norm_rows && ggml_nrows(rms->src[0]) >= 64;
+        vk_pipeline pipeline = tensors[5]->type == GGML_TYPE_F16 ?
+            (rows ? ctx->device->pipeline_rms_norm_mul_rope_rows_f32_f16 : ctx->device->pipeline_rms_norm_mul_rope_f32_f16) :
+            (rows ? ctx->device->pipeline_rms_norm_mul_rope_rows_f32_f32 : ctx->device->pipeline_rms_norm_mul_rope_f32_f32);
 
         ggml_pipeline_request_descriptor_sets(ctx, pipeline, 1);
 

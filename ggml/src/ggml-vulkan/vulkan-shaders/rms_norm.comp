@@ -182,21 +182,27 @@ void main() {
     // instantiate the rms_norm function for several different
     // dimensions, to allow loop unrolling
     uint num_blocks = (p.ne00 + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    if (num_blocks > 32) {
+#if RMS_NORM_ROPE_FUSION
+    // rows are at most 1024 wide (rope_data_a), leave out the wider instantiations
+    const uint max_blocks = 1024 / BLOCK_SIZE;
+#else
+    const uint max_blocks = 0xffffffffu;
+#endif
+    if (max_blocks > 32 && num_blocks > 32) {
         rms_norm(num_blocks, false);
-    } else if (num_blocks > 16) {
+    } else if (max_blocks > 16 && num_blocks > 16) {
         rms_norm(32, RMS_CACHE);
-    } else if (num_blocks > 12) {
+    } else if (max_blocks > 12 && num_blocks > 12) {
         rms_norm(16, RMS_CACHE);
-    } else if (num_blocks > 10) {
+    } else if (max_blocks > 10 && num_blocks > 10) {
         rms_norm(12, RMS_CACHE);
-    } else if (num_blocks > 8) {
+    } else if (max_blocks > 8 && num_blocks > 8) {
         rms_norm(10, RMS_CACHE);
-    } else if (num_blocks > 4) {
+    } else if (max_blocks > 4 && num_blocks > 4) {
         rms_norm(8, RMS_CACHE);
-    } else if (num_blocks == 4) {
+    } else if (max_blocks >= 4 && num_blocks == 4) {
         rms_norm(4, RMS_CACHE);
-    } else if (num_blocks == 3) {
+    } else if (max_blocks >= 3 && num_blocks == 3) {
         rms_norm(3, RMS_CACHE);
     } else if (num_blocks == 2) {
         rms_norm(2, RMS_CACHE);
