@@ -365,6 +365,10 @@ void main() {
 //     -> mask and softmax are now small; holding K/V across the loop costs more registers than it saves loads.
 //        V was filled into shared memory element by element (2 byte loads per value) because NAK staged every B matrix
 //        column-major; NAK now stages untransposed B row-major. With that and 64x32 tiles on NVK: full 21.3.
+//   Qwen3-4B pp512 FA per call (causal mask, us), 64x64, NVK / NVIDIA: full 265 / 167, no softmax 217 / 163,
+//   no all -inf check 215 / 209, no mask add 256 / 162 -> NVK softmax and the check cost much more than on NVIDIA.
+//     The P -> A conversion went through shared memory and all K/V fragments were loaded before the MMAs; after the
+//     NAK fixes for those (and transposed LDSM for V): full 248, no softmax 205, no check 210.
 #ifndef FA_EXPERIMENT
 #define FA_EXPERIMENT 0
 #endif

@@ -1324,10 +1324,6 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
         if (device->driver_id == vk::DriverId::eMesaNvk && result.block_rows == 64 && (hsk >= 256 || hsv >= 256)) {
             result.block_cols = 16;
         }
-    } else if (device->driver_id == vk::DriverId::eMesaNvk) {
-        // 64x64 spills on NVK, 64x32 does not (hsk=128 prompt FA ~-25%)
-        result.block_rows = 64;
-        result.block_cols = 32;
     } else {
         result.block_rows = 64;
         result.block_cols = 64;
