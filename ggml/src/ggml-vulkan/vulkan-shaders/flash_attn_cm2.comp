@@ -366,7 +366,7 @@ void main() {
 
 // Profiling experiment, off by default. Bits remove one part of the loop, to see how much time it takes:
 //   1 = K and V loaded once before the loop, 2 = no softmax (P = S), 4 = no mask, 8 = no "mask all -inf" skip check, 16 = mask loaded but not added
-//   32 = no Q load (Q = 0), 64 = no loop iterations (only the setup and the stores)
+//   32 = no Q load (Q = 0), 64 = no loop iterations (only the setup and the stores), 128 = no output stores (GQA)
 // Results are wrong when it is not 0. Use -DFA_EXPERIMENT=N or edit the default below.
 // Result on RTX 4060 + NVK (FA hsk=128 nh=8 nr23=[4,1] kv=4096 nb=4096, ms; NVIDIA driver 12.5 for the full run):
 //   2026-11-01, 64x64 tiles, 255 GPRs + 521 spills: full 63, no softmax 42-47, no mask 39, no mask + no softmax 29, no all -inf check 57, no mask add 46.
@@ -389,6 +389,10 @@ void main() {
 //     neither 1.44, no all -inf check 1.98; no loop iterations at all: 7.0 (11.7 with split_k 4 and its reduce).
 //     Loading V right after K (so both fills share one memory wait) changed nothing (+1-3%).
 //     Before the first case of a test-backend-ops run the GPU may not have clocked up: it measured 2x slower.
+//     Fixed cost, NVK / NVIDIA (kv=256, us): no loop, split_k 1: 6.9 / ~3; no loop, no stores: 5.0 / ~2.8; no loop,
+//     split_k 4: 10.3 / ~6 (the reduce dispatch is ~3.3 / ~2.4); without the loop, no Q load saves ~1.0 / ~0.5.
+//     -> the GQA store (perElemOpGqaStore) was a bounds-check branch and reconvergence per element. NAK now predicates
+//        small ifs around stores like NVIDIA does: no loop 6.9 -> 5.7, full kv=256 15.5 -> 14.0, kv=1024 25.4 -> 24.0.
 #if (FA_EXPERIMENT & 1)
     coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, HSK_pad, Bc, gl_MatrixUseB> xK_T;
     coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Bc, HSV_pad, gl_MatrixUseB> xV;
@@ -584,6 +588,7 @@ void main() {
         coopmat<D_TYPE, gl_ScopeWorkgroup, Br, HSV_pad, gl_MatrixUseAccumulator> O_D = coopmat<D_TYPE, gl_ScopeWorkgroup, Br, HSV_pad, gl_MatrixUseAccumulator>(O);
 
         if (p.gqa_ratio > 1) {
+#if (FA_EXPERIMENT & 128) == 0
             // note: O and Q have swapped coord 1,2.
             uint32_t o_offset = HSV * p.ne1 * (split_k_index + p.k_num * (gqa_iq1 + p.ne2 * iq3));
             coopMatPerElementNV(O_D, O_D, perElemOpGqaStore, o_offset, iq2, N);
@@ -591,6 +596,7 @@ void main() {
             o_offset = HSV * p.ne1 * p.k_num * p.ne2 * p.ne3 + p.ne1 * 2 * (split_k_index + p.k_num * (gqa_iq1 + p.ne2 * iq3));
             coopMatPerElementNV(L, L, perElemOpStoreCol0, o_offset, iq2, N);
             coopMatPerElementNV(M, M, perElemOpStoreCol0, o_offset + p.ne1, iq2, N);
+#endif
         } else {
             coopMatPerElementNV(O_D, O_D, perElemOpNonGqaSplitKStore, 0u, iq2, N);
             coopMatPerElementNV(L, L, perElemOpNonGqaSplitKStoreCol0, 0u, iq2, N);
@@ -648,7 +654,9 @@ void main() {
     uint32_t o_offset = gqa_iq1*p.ne1*HSV + iq3*p.ne2*p.ne1*HSV;
 
     if (p.gqa_ratio > 1) {
+#if (FA_EXPERIMENT & 128) == 0
         coopMatPerElementNV(O_D, O_D, perElemOpGqaStore, o_offset, iq2, N);
+#endif
     } else {
         tensorLayoutNV<3, gl_CooperativeMatrixClampModeConstantNV> tensorLayoutD = createTensorLayoutNV(3, gl_CooperativeMatrixClampModeConstantNV);
         tensorLayoutD = setTensorLayoutDimensionNV(tensorLayoutD, p.ne2, p.ne1, HSV);
