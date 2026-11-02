@@ -1331,6 +1331,12 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
 
     result.subgroup_size = device->subgroup_size;
     result.workgroup_size = (small_rows && (D % 32) == 0) ? 256 : 128;
+    // NVK: 256 invocations split the 32x32 blocks over 8 subgroups and NAK needs all 255
+    // registers either way, so only one workgroup fits on an SM. With 128, token generation
+    // FA (Qwen3-4B, kv=256..4096) is 1.8-3.8x faster.
+    if (device->driver_id == vk::DriverId::eMesaNvk) {
+        result.workgroup_size = 128;
+    }
 
     // One 16-column tile for the per-row L/M values instead of a whole block: NVK prompt
     // FA -45% (fewer registers, no spills on Ada). The NVIDIA driver's compiler crashes on

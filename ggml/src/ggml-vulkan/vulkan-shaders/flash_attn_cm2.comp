@@ -113,6 +113,11 @@ f16vec4 faDecodeVVector(const decodeBufFA_V bl_in, const uint blockCoords[2], co
 #endif
 #endif
 
+// Profiling experiment bits, see main()
+#ifndef FA_EXPERIMENT
+#define FA_EXPERIMENT 0
+#endif
+
 layout (binding = 0) readonly buffer Q {uint8_t data_q[];};
 layout (binding = 1) readonly buffer K {uint8_t data_k[];};
 layout (binding = 2) readonly buffer V {uint8_t data_v[];};
@@ -319,7 +324,11 @@ void main() {
     coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Br, HSK_pad, gl_MatrixUseA> Qf16;
 
     uint32_t q_offset = gqa_iq1*p.nb01*4/*sizeof(float)*/ + iq2*p.nb02+iq3*p.nb03;
+#if (FA_EXPERIMENT & 32)
+    Q = coopmat<Q_TYPE, gl_ScopeWorkgroup, Br, HSK_pad, gl_MatrixUseAccumulator>(0);
+#else
     coopMatLoadTensorNV(Q, data_q, q_offset, sliceTensorLayoutNV(tensorLayoutQ, i * Br, Br, 0, HSK_pad));
+#endif
 
     Q *= Q_TYPE(p.scale);
     Qf16 = coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Br, HSK_pad, gl_MatrixUseA>(Q);
@@ -357,6 +366,7 @@ void main() {
 
 // Profiling experiment, off by default. Bits remove one part of the loop, to see how much time it takes:
 //   1 = K and V loaded once before the loop, 2 = no softmax (P = S), 4 = no mask, 8 = no "mask all -inf" skip check, 16 = mask loaded but not added
+//   32 = no Q load (Q = 0), 64 = no loop iterations (only the setup and the stores)
 // Results are wrong when it is not 0. Use -DFA_EXPERIMENT=N or edit the default below.
 // Result on RTX 4060 + NVK (FA hsk=128 nh=8 nr23=[4,1] kv=4096 nb=4096, ms; NVIDIA driver 12.5 for the full run):
 //   2026-11-01, 64x64 tiles, 255 GPRs + 521 spills: full 63, no softmax 42-47, no mask 39, no mask + no softmax 29, no all -inf check 57, no mask add 46.
@@ -369,9 +379,16 @@ void main() {
 //   no all -inf check 215 / 209, no mask add 256 / 162 -> NVK softmax and the check cost much more than on NVIDIA.
 //     The P -> A conversion went through shared memory and all K/V fragments were loaded before the MMAs; after the
 //     NAK fixes for those (and transposed LDSM for V): full 248, no softmax 205, no check 210.
-#ifndef FA_EXPERIMENT
-#define FA_EXPERIMENT 0
-#endif
+//   Token generation (hsk=128 nh=8 nr23=[4,1] nb=1, gqa 4 -> 32x32 blocks, us; NVIDIA driver ~10 in Qwen3-4B tg at kv=256):
+//     2026-11-02, 256 invocations: kv=256 31, in the model 42.6 per call. NAK gives the shader 255 registers (16k
+//     instructions), so 256 invocations leave one workgroup per SM; 128 (now the NVK default): kv=256 17, kv=4096 69.
+//     no Q load: 31.7 -> 20.7 in the model. Q has only gqa_ratio rows in the 32-row block, so NAK filled it element by
+//     element with a branch and a full memory wait for each one; NAK now loads tiles that cross the end of a tensor
+//     with vector loads too: 24.9.
+//     With one workgroup per head (split_k 1, kv=4096): 2.24 us per KV block, no mask 1.62, no softmax 2.0,
+//     neither 1.44, no all -inf check 1.98; no loop iterations at all: 7.0 (11.7 with split_k 4 and its reduce).
+//     Loading V right after K (so both fills share one memory wait) changed nothing (+1-3%).
+//     Before the first case of a test-backend-ops run the GPU may not have clocked up: it measured 2x slower.
 #if (FA_EXPERIMENT & 1)
     coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, HSK_pad, Bc, gl_MatrixUseB> xK_T;
     coopmat<FLOAT_TYPE, gl_ScopeWorkgroup, Bc, HSV_pad, gl_MatrixUseB> xV;
@@ -380,7 +397,11 @@ void main() {
 #endif
 
     [[dont_unroll]]
+#if (FA_EXPERIMENT & 64)
+    for (uint32_t j = start_j; j < start_j; ++j) {
+#else
     for (uint32_t j = start_j; j < end_j; ++j) {
+#endif
 
         coopmat<float16_t, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator> mv = coopmat<float16_t, gl_ScopeWorkgroup, Br, Bc, gl_MatrixUseAccumulator>(0);
         if (MASK_ENABLE && !USE_SPARSE && (FA_EXPERIMENT & 4) == 0) {
