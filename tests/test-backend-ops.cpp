@@ -12056,6 +12056,13 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
 // Test cases for performance evaluation: should be representative of real-world use cases
 static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     std::vector<std::unique_ptr<test_case>> test_cases;
+    // Qwen3-4B pp512 matmul shapes (q4_K_M: q4_K and q6_K weights); first one again as a warm-up
+    for (auto [t, m, k] : std::vector<std::tuple<ggml_type, int, int>>{
+             {GGML_TYPE_Q4_K, 9728, 2560}, {GGML_TYPE_Q4_K, 9728, 2560}, {GGML_TYPE_Q6_K, 2560, 9728},
+             {GGML_TYPE_Q4_K, 2560, 9728}, {GGML_TYPE_Q4_K, 4096, 2560}, {GGML_TYPE_Q4_K, 2560, 4096},
+             {GGML_TYPE_Q4_K, 1024, 2560}, {GGML_TYPE_Q6_K, 1024, 2560}}) {
+        test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, m, 512, k, {1, 1}, {1, 1}));
+    }
     // token generation FA with GQA (Qwen3-4B-like), each size three times: the first case
     // of a run can be measured before the GPU has clocked up
     for (int kv : { 256, 1024, 256, 1024, 256, 1024 }) {

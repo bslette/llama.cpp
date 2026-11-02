@@ -516,6 +516,16 @@ void main() {
 // Profiling experiment, off by default. It does the same split as MM_EXPERIMENT in mul_mm.comp, for coopmat2.
 //   1 = load A/B once, then multiply every K block (time = MMA work)
 //   2 = load every K block, but multiply only once (time = load and decode work)
+//   3 = load A (with decode) every K block, B once; 4 = B every K block, A once (time = MMA + one side)
+//   5 = A always from the first K blocks (cache hits, same code), 6 = the same for B
+// Results on RTX 4060, Qwen3-4B pp512 shapes (n=512, us, NVK / NVIDIA, 2026-11-02):
+//   q4_K 9728x2560: full 840 / 718, MMA 626 / 585, loads 601 / 448, 3: 772 / 650
+//   q6_K 2560x9728: full 1087 / 826, MMA 592 / 589, loads 914 / 565, 3: 662 / 747
+//   5 and 6 on NVK: q4_K 825 and 838, q6_K 947 and 997 (cached operands barely help).
+// So the MMAs alone run at NVIDIA's speed and memory traffic isn't the limit on NVK: the
+// time goes to the in-SM work around the MMAs and how it overlaps them. 4 keeps A in
+// registers across the loop and starves NAK's register allocator (accumulator movs), so
+// its numbers (q4_K 1101 / 646) don't measure the B path.
 // Results are wrong when it is not 0. Use -DCM2_EXPERIMENT=N or edit the default below.
 // Compare against the NVIDIA driver with the same build to see how much of each part a driver overlaps.
 // Result on RTX 4060 (f16 MUL_MAT 4096x512x14336, us, 2026-10-31):
@@ -526,7 +536,7 @@ void main() {
 #ifndef CM2_EXPERIMENT
 #define CM2_EXPERIMENT 0
 #endif
-#if CM2_EXPERIMENT == 1
+#if CM2_EXPERIMENT == 1 || CM2_EXPERIMENT == 3 || CM2_EXPERIMENT == 4
             coopmat<MAT_TYPE, gl_ScopeWorkgroup, BM, BK, gl_MatrixUseA> xmat_a;
             coopmat<MAT_TYPE, gl_ScopeWorkgroup, BK, BN, gl_MatrixUseB> xmat_b;
             coopMatLoadTensorNV(xmat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, block_k, BK) DECODEFUNCA);
@@ -544,12 +554,28 @@ void main() {
                 [[unroll]] for (uint j = 0; j < unroll_count; ++j) {
 #if CM2_EXPERIMENT == 1
                     sum = coopMatMulAdd(xmat_a, xmat_b, sum);
+#elif CM2_EXPERIMENT == 3
+                    coopmat<MAT_TYPE, gl_ScopeWorkgroup, BM, BK, gl_MatrixUseA> mat_a;
+                    coopMatLoadTensorNV(mat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, block_k, BK) DECODEFUNCA);
+                    sum = coopMatMulAdd(mat_a, xmat_b, sum);
+#elif CM2_EXPERIMENT == 4
+                    coopmat<MAT_TYPE, gl_ScopeWorkgroup, BK, BN, gl_MatrixUseB> mat_b;
+                    coopMatLoadTensorNV(mat_b, data_b, pos_b, sliceTensorLayoutNV(tensorLayoutB, ic * BN, BN, block_k, BK), tensorViewTranspose);
+                    sum = coopMatMulAdd(xmat_a, mat_b, sum);
 #else
                     coopmat<MAT_TYPE, gl_ScopeWorkgroup, BM, BK, gl_MatrixUseA> mat_a;
                     coopmat<MAT_TYPE, gl_ScopeWorkgroup, BK, BN, gl_MatrixUseB> mat_b;
 
+#if CM2_EXPERIMENT == 5
+                    coopMatLoadTensorNV(mat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, start_k + j * BK, BK) DECODEFUNCA);
+#else
                     coopMatLoadTensorNV(mat_a, data_a, pos_a, sliceTensorLayoutNV(tensorLayoutA, ir * BM, BM, block_k, BK) DECODEFUNCA);
+#endif
+#if CM2_EXPERIMENT == 6
+                    coopMatLoadTensorNV(mat_b, data_b, pos_b, sliceTensorLayoutNV(tensorLayoutB, ic * BN, BN, start_k + j * BK, BK), tensorViewTranspose);
+#else
                     coopMatLoadTensorNV(mat_b, data_b, pos_b, sliceTensorLayoutNV(tensorLayoutB, ic * BN, BN, block_k, BK), tensorViewTranspose);
+#endif
 
 #if CM2_EXPERIMENT == 2
                     if (i == k_iters - 1 && j == 0)
