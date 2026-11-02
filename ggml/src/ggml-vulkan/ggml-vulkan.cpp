@@ -6777,10 +6777,13 @@ static bool ggml_vk_should_use_mmvq(const vk_device& device, uint32_t m, uint32_
             return true;
         }
 
-        // Volta on NVK (GV100/GV11B): MMVQ beats the dequantizing path for
-        // every type it handles, including Q8_0 and k = 2048.
-        if (device->driver_id == vk::DriverId::eMesaNvk &&
-            strstr(device->properties.deviceName, " GV1") != nullptr) {
+        // NVK: MMVQ beats the dequantizing path for every type it handles, including
+        // Q8_0 and k = 2048 on Volta (GV100/GV11B). On Ada (AD107) tg128 with it for
+        // k <= 4096 too: Qwen3-4B 63.5 -> 72.7, Llama-3.2-3B 82.1 -> 91.4, Llama-3.1-8B
+        // 37.9 -> 45.5, gemma-3-4b 60.6 -> 66.8, Qwen2.5-3B 80.2 -> 91.2, TinyLlama Q4_0
+        // 244 -> 247, Qwen3-14B IQ3_XXS 18.7 -> 18.6. NAK's code for the dequantizing
+        // shaders is the slow part (MMVQ with large k was already close to NVIDIA).
+        if (device->driver_id == vk::DriverId::eMesaNvk) {
             return true;
         }
 
