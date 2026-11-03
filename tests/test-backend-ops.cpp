@@ -3894,6 +3894,57 @@ struct test_rms_norm_mul_add : public test_case {
     }
 };
 
+// GGML_OP_RMS_NORM + GGML_OP_MUL by a weight row, as in a transformer block's input norm
+struct test_rms_norm_mul : public test_case {
+    const ggml_type type;
+    const std::array<int64_t, 4> ne;
+    const float eps;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "RMS_NORM_MUL";
+    }
+
+    bool run_whole_graph() override { return true; }
+
+    std::string vars() override {
+        return VARS_TO_STR3(type, ne, eps);
+    }
+
+    test_rms_norm_mul(ggml_type type = GGML_TYPE_F32,
+            std::array<int64_t, 4> ne = {64, 5, 4, 3},
+            float eps = 1e-6f)
+        : type(type), ne(ne), eps(eps) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor(ctx, type, 4, ne.data());
+        ggml_set_param(a);
+        ggml_set_name(a, "a");
+        ggml_tensor * w = ggml_new_tensor_1d(ctx, type, ne[0]);
+        ggml_set_param(w);
+        ggml_set_name(w, "w");
+
+        ggml_tensor * out = ggml_mul(ctx, ggml_rms_norm(ctx, a, eps), w);
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
+            init_tensor_uniform(t, -10.f, 10.f);
+        }
+    }
+
+    float grad_eps() override {
+        return 1.0f;
+    }
+
+    bool grad_precise() override {
+        return true;
+    }
+};
+
 // GGML_OP_ADD + GGML_OP_ADD (fused residual chain)
 struct test_add_add : public test_case {
     const ggml_type type;
@@ -10504,6 +10555,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_rms_norm    (GGML_TYPE_F32, {4, 1, 1, 65536}, false, 1e-6f, false));
     test_cases.emplace_back(new test_l2_norm     (GGML_TYPE_F32, {4, 1, 65536, 1}, 1e-12f, false, false));
     test_cases.emplace_back(new test_rms_norm_mul_add(GGML_TYPE_F32, {4, 1, 65536, 1}, 1e-6f, false, false));
+    for (int64_t n : {64, 2560, 4096}) {
+        for (int64_t rows : {1, 7, 512}) {
+            test_cases.emplace_back(new test_rms_norm_mul(GGML_TYPE_F32, {n, rows, 1, 1}));
+        }
+    }
 
     for (ggml_type set_rows_type : { GGML_TYPE_F32, GGML_TYPE_F16 }) {
         test_cases.emplace_back(new test_rms_norm_mul_rope({ 256, 1, 1, 1 }, 1e-6f, false, true, false, GGML_ROPE_TYPE_NORMAL, false, false, set_rows_type));
@@ -12074,6 +12130,16 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     // of a run can be measured before the GPU has clocked up
     for (int kv : { 256, 1024, 256, 1024, 256, 1024 }) {
         test_cases.emplace_back(new test_flash_attn_ext(128, 128, 8, {4, 1}, kv, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
+    }
+    // Qwen3-4B pp512 flash attention and RMS norm (twice: warm-up)
+    for (int i = 0; i < 2; i++) {
+        test_cases.emplace_back(new test_flash_attn_ext(128, 128, 8, {4, 1}, 512, 512, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
+    }
+    for (int i = 0; i < 2; i++) {
+        test_cases.emplace_back(new test_rms_norm(GGML_TYPE_F32, {2560, 512, 1, 1}, false, 1e-6f));
+    }
+    for (int i = 0; i < 2; i++) {
+        test_cases.emplace_back(new test_rms_norm_mul(GGML_TYPE_F32, {2560, 512, 1, 1}));
     }
 
 
