@@ -12063,6 +12063,13 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
              {GGML_TYPE_Q4_K, 1024, 2560}, {GGML_TYPE_Q6_K, 1024, 2560}}) {
         test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, m, 512, k, {1, 1}, {1, 1}));
     }
+    // the same shapes in token generation (n = 1: matrix-vector)
+    for (auto [t, m, k] : std::vector<std::tuple<ggml_type, int, int>>{
+             {GGML_TYPE_Q4_K, 9728, 2560}, {GGML_TYPE_Q4_K, 9728, 2560}, {GGML_TYPE_Q6_K, 2560, 9728},
+             {GGML_TYPE_Q4_K, 2560, 9728}, {GGML_TYPE_Q4_K, 4096, 2560}, {GGML_TYPE_Q4_K, 1024, 2560},
+             {GGML_TYPE_Q6_K, 1024, 2560}, {GGML_TYPE_Q8_0, 4096, 2560}, {GGML_TYPE_F16, 4096, 2560}}) {
+        test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, m, 1, k, {1, 1}, {1, 1}));
+    }
     // token generation FA with GQA (Qwen3-4B-like), each size three times: the first case
     // of a run can be measured before the GPU has clocked up
     for (int kv : { 256, 1024, 256, 1024, 256, 1024 }) {
