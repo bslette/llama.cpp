@@ -1350,6 +1350,22 @@ vk_fa_tuning_params get_fa_tuning_params(const vk_device& device, uint32_t hsk, 
     FaCodePath path = device->coopmat2 ? FA_COOPMAT2 :
                       device->coopmat1_fa_support ? FA_COOPMAT1 : FA_SCALAR;
 
+    // NVK: for a few rows (token generation with GQA) coopmat1 beats NVK's coopmat2 up to
+    // about 4096 KV entries (Qwen3-4B shape, RTX 4060: kv=256 14.4 -> 11.6 us, kv=1024
+    // 24.4 -> 22.4); past that coopmat2 wins (kv=16384 290 vs 394).
+    // GGML_VK_NVK_FA_SMALL=cm2|cm1|scalar overrides.
+    if (device->driver_id == vk::DriverId::eMesaNvk && n_rows <= 8 && path == FA_COOPMAT2 &&
+        strstr(device->properties.deviceName, " GV1") == nullptr) {
+        const char *e = getenv("GGML_VK_NVK_FA_SMALL");
+        if (e && !strcmp(e, "scalar")) {
+            path = FA_SCALAR;
+        } else if (e ? !strcmp(e, "cm1") : n_kv <= 4096) {
+            if (device->coopmat1_fa_support) {
+                path = FA_COOPMAT1;
+            }
+        }
+    }
+
     if (path == FA_COOPMAT2 && k_type == GGML_TYPE_BF16 && !device->coopmat2_bf16_support) {
         path = FA_COOPMAT1;
     }
